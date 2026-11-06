@@ -1,0 +1,10 @@
+node_modules/
+dist/
+public/vendor/
+.DS_Store
+*.log
+.precision-python/
+.precision-jobs/
+__pycache__/
+
+standalone/

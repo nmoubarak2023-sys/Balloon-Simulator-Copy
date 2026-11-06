@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#05090b" />
+    <meta
+      name="description"
+      content="Balloon Build — an interactive mesh and curve pressure design studio."
+    />
+    <title>Balloon Build</title>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="./"><b>◉</b> BALLOON<span>BUILD</span></a
+      ><span class="header-note">VOLUMETRIC DESIGN STUDIO &nbsp; / 01</span>
+      <div class="header-actions">
+        <button id="undoBtn" disabled title="Undo last action (Ctrl+Z)">
+          ↶ UNDO <small>CTRL+Z</small></button
+        ><button id="helpBtn">HOW IT WORKS ↗</button>
+      </div>
+    </header>
+    <main>
+      <div class="workspace">
+        <section class="viewer-panel panel">
+          <div class="panel-heading">
+            <span
+              ><i class="dot"></i> PERSPECTIVE
+              <small>01 / LIVE GEOMETRY</small></span
+            >
+            <div class="view-actions">
+              <button id="homeBtn">FIT ↗</button
+              ><button id="rotateBtn" aria-pressed="false">AUTO ROTATE</button
+              ><button id="wireBtn" aria-pressed="false">WIRE</button>
+            </div>
+          </div>
+          <div
+            class="canvas-tools"
+            role="toolbar"
+            aria-label="Canvas editing tools"
+          >
+            <button data-canvas-tool="orbit" aria-pressed="false">ORBIT</button>
+            <button data-canvas-tool="boundary" aria-pressed="false">
+              ROTATE BOUNDARY
+            </button>
+            <button data-canvas-tool="move" aria-pressed="true">
+              MOVE BALLOON
+            </button>
+            <button data-canvas-tool="scale" aria-pressed="false">
+              SCALE BALLOON
+            </button>
+            <button data-canvas-tool="scale1d" aria-pressed="false">
+              SCALE 1D
+            </button>
+            <button data-canvas-tool="curve" aria-pressed="false">
+              CURVE POINTS
+            </button>
+            <button data-canvas-tool="curveMove" aria-pressed="false">
+              MOVE CURVE
+            </button>
+            <button data-canvas-tool="clipMove" aria-pressed="false">
+              MOVE CLIP
+            </button>
+            <button data-canvas-tool="clipRotate" aria-pressed="false">
+              ROTATE CLIP
+            </button>
+            <button
+              id="clipToggle"
+              aria-pressed="false"
+              aria-label="Clipping plane on or off"
+            >
+              CLIP OFF
+            </button>
+            <span id="selectionInfo" aria-live="polite"
+              >CLICK A BALLOON TO SELECT</span
+            >
+          </div>
+          <div
+            class="balloon-actions"
+            role="toolbar"
+            aria-label="Balloon operations"
+          >
+            <button id="popBtn" class="pop-button">Pop!</button>
+            <button id="freezeBtn">Freeze</button>
+            <button id="mergeBtn">Merge</button>
+            <label for="popPressure"
+              >Pop pressure <output id="popPressureValue">25%</output
+              ><input
+                id="popPressure"
+                type="range"
+                min="0"
+                max="100"
+                value="25"
+                step="1"
+            /></label>
+            <span id="operationHint"
+              >Shift-click balloons to select several for Merge.</span
+            >
+          </div>
+          <div id="exactRotation" class="rotation-controls" hidden>
+            <label
+              >Axis<select id="rotationAxis">
+                <option value="X">X</option>
+                <option value="Y">Y</option>
+                <option value="Z" selected>Z</option>
+              </select></label
+            >
+            <label
+              >Rotate by<input
+                id="rotationDegrees"
+                type="number"
+                value="90"
+                step="1"
+                aria-label="Rotation degrees"
+            /></label>
+            <button id="applyRotation" class="primary">APPLY °</button>
+            <div class="rotation-presets" aria-label="Exact rotation presets">
+              <button data-rotate-degrees="-90">−90°</button
+              ><button data-rotate-degrees="90">+90°</button
+              ><button data-rotate-degrees="180">180°</button>
+            </div>
+            <label
+              >Ring snap<select id="rotationSnap">
+                <option value="0">Free</option>
+                <option value="15">15°</option>
+                <option value="45">45°</option>
+                <option value="90" selected>90°</option>
+              </select></label
+            >
+            <span id="rotationContext"
+              >BOUNDARY · WORLD AXES · ABOUT MESH CENTER</span
+            >
+          </div>
+          <div id="viewport">
+            <div class="viewport-label">
+              BALLOON FIELD <span id="fieldLabel">DEMO / CLOSED CONTAINER</span>
+            </div>
+            <div class="axis-key">Z ↑<br />Y ↗<br />X →</div>
+            <div class="view-hint" id="canvasHint">
+              CLICK A BALLOON · DRAG IT OR ITS AXIS ARROWS · EMPTY SPACE ORBITS
+            </div>
+          </div>
+          <div class="viewer-footer">
+            <span id="meshStats">INITIALIZING GEOMETRY ENGINE</span
+            ><span class="accent">LOCAL COMPUTATION ●</span>
+          </div>
+        </section>
+        <aside>
+          <section class="plan-panel panel">
+            <div class="panel-heading">
+              <span>PLAN VIEW <small>02 / XY</small></span
+              ><button id="curveEditBtn" aria-pressed="false">
+                EDIT CURVE
+              </button>
+            </div>
+            <div id="planViewport"></div>
+            <p class="plan-hint">
+              Drag balloons or curve points in XY. 3D view adds Z handles.
+            </p>
+          </section>
+          <section class="controls panel">
+            <div class="panel-heading">
+              <span>CONTROL PANEL</span><span class="accent">03</span>
+            </div>
+            <div class="control-scroll">
+              <details open>
+                <summary><span>01</span> BOUNDARY MESH</summary>
+                <div class="section-body">
+                  <label class="upload" for="meshFile"
+                    >＋ IMPORT CONTAINER
+                    <small>.3DM / .STL / .OBJ</small></label
+                  ><input
+                    hidden
+                    type="file"
+                    id="meshFile"
+                    accept=".3dm,.stl,.obj"
+                  /><select
+                    id="meshSelect"
+                    hidden
+                    aria-label="Choose a closed Rhino mesh"
+                  ></select>
+                  <div class="file-row">
+                    <span id="fileName">Demonstration container</span
+                    ><button id="demoBtn">RESET</button>
+                  </div>
+                  <p class="note">
+                    Import one closed mesh. Rhino: Mesh → Export Selected →
+                    .3dm. Radii and dimensions use your model units.
+                  </p>
+                  <p class="note">
+                    Choose ROTATE BOUNDARY, select X, Y, or Z, then enter
+                    degrees or use the 90° / 180° presets. Rings snap to 90° by
+                    default. Rotation resets unfrozen edits. Frozen geometry
+                    stays fixed; a rotation that would exclude it is rejected.
+                  </p>
+                  <label class="check"
+                    ><input id="showBoundary" type="checkbox" checked /> Show
+                    boundary</label
+                  >
+                </div>
+              </details>
+              <details open>
+                <summary><span>02</span> POPULATING POINTS</summary>
+                <div class="section-body">
+                  <div class="control">
+                    <label for="count">Count</label
+                    ><input
+                      id="countN"
+                      type="number"
+                      min="1"
+                      max="40"
+                      value="12"
+                      aria-label="Balloon count"
+                    /><input
+                      id="count"
+                      type="range"
+                      min="1"
+                      max="40"
+                      value="12"
+                    />
+                  </div>
+                  <div class="inline">
+                    <label for="pointSeed">Point seed</label
+                    ><input
+                      type="number"
+                      id="pointSeed"
+                      value="42"
+                      min="0"
+                      max="2147483647"
+                    /><button id="shuffleBtn">↻</button>
+                  </div>
+                </div>
+              </details>
+              <details open>
+                <summary><span>03</span> FINAL BALLOONS</summary>
+                <div class="section-body">
+                  <div class="pair">
+                    <label
+                      >Radius min<input
+                        id="radiusMin"
+                        type="number"
+                        value="14"
+                        min="0.001"
+                        step="0.5" /></label
+                    ><label
+                      >Radius max<input
+                        id="radiusMax"
+                        type="number"
+                        value="24"
+                        min="0.001"
+                        step="0.5"
+                    /></label>
+                  </div>
+                  <div class="inline">
+                    <label for="radiusSeed">Radius seed</label
+                    ><input
+                      id="radiusSeed"
+                      type="number"
+                      value="17"
+                      min="0"
+                      max="2147483647"
+                    />
+                  </div>
+                  <div class="inline">
+                    <label for="quality">Mesh quality</label
+                    ><select id="quality">
+                      <option value="48">Smooth / 48</option>
+                      <option value="80" selected>High / 80</option>
+                      <option value="128">Ultra / 128</option>
+                    </select>
+                  </div>
+                  <div class="inline">
+                    <label for="clearance">Contact gap</label
+                    ><input
+                      id="clearance"
+                      type="number"
+                      min="0.0001"
+                      step="0.01"
+                      value="0.12"
+                    />
+                  </div>
+                  <button id="generateBtn" class="primary">
+                    GENERATE BALLOONS ↗
+                  </button>
+                  <p class="note">
+                    Generation resets unfrozen edits, while frozen shapes,
+                    popped balloons, and merge groups persist. Seeds repeat
+                    within this app.
+                  </p>
+                </div>
+              </details>
+              <details>
+                <summary><span>04</span> CURVE PRESSURE</summary>
+                <div class="section-body">
+                  <label for="curveSelect">Deformation curve (up to 5)</label>
+                  <select id="curveSelect"></select>
+                  <div class="pair">
+                    <button id="addCurve">ADD CURVE</button
+                    ><button id="removeCurve">REMOVE CURVE</button>
+                  </div>
+                  <p class="note">
+                    Choose MOVE CURVE, then drag a pink line to move the entire
+                    curve. CURVE POINTS edits its shape. All curves share
+                    strength and influence; the nearest curve controls pressure.
+                  </p>
+                  <label class="check"
+                    ><input id="pressureEnabled" type="checkbox" /> Enable
+                    pressure</label
+                  >
+                  <div class="control">
+                    <label for="strength">Deformation strength</label
+                    ><input
+                      id="strengthN"
+                      type="number"
+                      min="0"
+                      max="50"
+                      value="8"
+                      step="0.5"
+                      aria-label="Deformation strength"
+                    /><input
+                      id="strength"
+                      type="range"
+                      min="0"
+                      max="50"
+                      value="8"
+                      step="0.5"
+                    />
+                  </div>
+                  <div class="control">
+                    <label for="influence">Influence distance</label
+                    ><input
+                      id="influenceN"
+                      type="number"
+                      min="0.01"
+                      max="100"
+                      value="25"
+                      step="0.5"
+                      aria-label="Influence distance"
+                    /><input
+                      id="influence"
+                      type="range"
+                      min="0.01"
+                      max="100"
+                      value="25"
+                      step="0.5"
+                    />
+                  </div>
+                  <div class="pair">
+                    <button id="resetCurveBtn">RESET CURVE</button
+                    ><label class="button" for="curveFile">IMPORT .3DM</label
+                    ><input hidden type="file" id="curveFile" accept=".3dm" />
+                  </div>
+                  <label for="curvePoint">Control point</label
+                  ><select id="curvePoint"></select>
+                  <div class="triple">
+                    <label>X<input id="curveX" type="number" step="1" /></label
+                    ><label>Y<input id="curveY" type="number" step="1" /></label
+                    ><label
+                      >Z<input id="curveZ" type="number" step="1"
+                    /></label>
+                  </div>
+                  <button id="updateCurveBtn">UPDATE POINT</button
+                  ><button id="pressureBtn" class="primary">
+                    APPLY PRESSURE ↗
+                  </button>
+                  <p class="note">
+                    Edit curve, then apply pressure. Inward compression retains
+                    a 25% core. Wall and contact constraints are reapplied.
+                    Applying pressure resets unfrozen edits. Frozen shapes
+                    remain fixed.
+                  </p>
+                </div>
+              </details>
+              <details>
+                <summary><span>05</span> INDIVIDUAL BALLOON</summary>
+                <div class="section-body">
+                  <label for="balloonSelect">Selected balloon</label
+                  ><select id="balloonSelect"></select>
+                  <p id="balloonState" class="note">
+                    Select a balloon in either canvas.
+                  </p>
+                  <div class="triple">
+                    <label
+                      >Move X<input
+                        id="moveX"
+                        type="number"
+                        value="0"
+                        step="1" /></label
+                    ><label
+                      >Move Y<input
+                        id="moveY"
+                        type="number"
+                        value="0"
+                        step="1" /></label
+                    ><label
+                      >Move Z<input id="moveZ" type="number" value="0" step="1"
+                    /></label>
+                  </div>
+                  <div class="inline">
+                    <label for="scale">Scale</label
+                    ><input
+                      id="scale"
+                      type="number"
+                      min="0.1"
+                      max="3"
+                      step="0.05"
+                      value="1"
+                    />
+                  </div>
+                  <div class="scale1d-controls">
+                    <label for="scale1dAxis">Scale 1D axis</label
+                    ><select id="scale1dAxis">
+                      <option value="0">X</option>
+                      <option value="1">Y</option>
+                      <option value="2">Z</option></select
+                    ><label for="scale1dFactor">Axis factor</label
+                    ><input
+                      id="scale1dFactor"
+                      type="number"
+                      min="0.1"
+                      max="3"
+                      step="0.05"
+                      value="1"
+                    /><button id="applyScale1d">APPLY SCALE 1D ↗</button>
+                    <p class="note">
+                      Scales one world axis about the balloon center. The other
+                      two dimensions and the uniform scale stay unchanged.
+                      Factor 1 resets this axis.
+                    </p>
+                  </div>
+                  <div class="pair">
+                    <button id="resetBalloonBtn">RESET SELECTED</button
+                    ><button id="applyBalloonBtn" class="primary">
+                      APPLY ↗
+                    </button>
+                  </div>
+                  <p class="note">
+                    Moving or scaling a balloon dents unfrozen neighbors to make
+                    space on release. Walls and frozen balloons remain fixed.
+                    Moves cannot destroy or split a neighbor. Undo restores the
+                    complete field before a move.
+                  </p>
+                </div>
+              </details>
+              <details>
+                <summary><span>06</span> POP! / FREEZE / MERGE</summary>
+                <div class="section-body">
+                  <p class="note">
+                    Pop! removes the active balloon and dents unfrozen
+                    neighbors. Set the pressure before popping, or adjust it
+                    after the last pop. A later edit, freeze, merge, or
+                    regeneration ends that live adjustment.
+                  </p>
+                  <p class="note">
+                    Freeze locks the active balloon's exact current shape and
+                    position. Frozen balloons remain fixed during curve
+                    pressure, regeneration, and nearby pops. Unfreeze before
+                    moving, popping, or merging them.
+                  </p>
+                  <label>Merge selection</label>
+                  <div id="mergeChoices" class="merge-choices"></div>
+                  <p class="note">
+                    Shift/Ctrl-click in either canvas, or use the checkboxes.
+                    Merge joins nearby balloons into one connected volume,
+                    filling only small contact gaps and removing internal
+                    interfaces.
+                  </p>
+                  <button id="resetOperationsBtn">
+                    RESET POP / FREEZE / MERGE
+                  </button>
+                </div>
+              </details>
+              <details>
+                <summary><span>07</span> OUTPUT & EXPORT</summary>
+                <div class="section-body">
+                  <label for="outputMode">Output mode</label
+                  ><select id="outputMode">
+                    <option value="shell">
+                      Shell assembly / no material removed
+                    </option>
+                    <option value="boolean">
+                      Boolean subtraction / cavities
+                    </option>
+                  </select>
+                  <div class="inline">
+                    <label for="tolerance">Tolerance</label
+                    ><input
+                      id="tolerance"
+                      type="number"
+                      value="0.0001"
+                      min="0.000001"
+                      step="0.0001"
+                    />
+                  </div>
+                  <label for="outputQuality">Boolean quality</label>
+                  <select id="outputQuality">
+                    <option value="precision">
+                      Precision / thin walls (local engine)
+                    </option>
+                    <option value="rebuild">
+                      Rebuild surface / approximate
+                    </option>
+                    <option value="final" selected>
+                      Final / repair and retriangulate
+                    </option>
+                    <option value="preview">Preview / repair only</option>
+                  </select>
+                  <p class="note">
+                    Precision requires Start-Balloon-Precision.cmd on this
+                    computer. It retains the contact-gap setting and uses
+                    tolerance-scale numerical repairs.
+                  </p>
+                  <label for="rebuildResolution">Rebuild resolution</label>
+                  <select id="rebuildResolution">
+                    <option value="96">96 / quick comparison</option>
+                    <option value="160" selected>160 / balanced</option>
+                    <option value="224">224 / finer detail</option>
+                    <option value="256">256 / dense</option>
+                  </select>
+                  <p class="note">
+                    Rebuild creates a new surface from the occupied volume. It
+                    avoids CSG triangle fans, but fine walls, gaps and sharp
+                    details are limited by the grid size. Original balloons
+                    remain unchanged.
+                  </p>
+                  <button id="outputBtn" class="primary">BUILD OUTPUT ↗</button>
+                  <button id="exportQuality">DOWNLOAD QUALITY REPORT</button>
+                  <p id="outputStatus" class="note">
+                    Separate input shells are always preserved.
+                  </p>
+                  <div class="pair">
+                    <button id="export3dm">EXPORT .3DM</button
+                    ><button id="exportObj">EXPORT .OBJ</button>
+                  </div>
+                  <button id="exportStl">EXPORT .STL</button>
+                  <label class="check"
+                    ><input id="clippingEnabled" type="checkbox" /> Clipping
+                    plane (view only)</label
+                  >
+                  <button id="resetClip">RESET CLIPPING PLANE</button>
+                  <p class="note">
+                    MOVE CLIP drags the plane; ROTATE CLIP turns its rings.
+                    Clipping does not trim exports.
+                  </p>
+                  <div class="pair">
+                    <button id="saveProject">SAVE PROJECT</button
+                    ><label class="button" for="projectFile">OPEN PROJECT</label
+                    ><input
+                      hidden
+                      id="projectFile"
+                      type="file"
+                      accept=".json"
+                    />
+                  </div>
+                  <label for="iterationName">Iteration name</label
+                  ><input
+                    id="iterationName"
+                    type="text"
+                    maxlength="100"
+                    placeholder="Iteration 01"
+                  />
+                  <button id="saveIteration">SAVE ITERATION</button>
+                  <label for="iterationSelect">Saved on this browser</label
+                  ><select id="iterationSelect"></select>
+                  <div class="pair">
+                    <button id="loadIteration">LOAD ITERATION</button
+                    ><button id="deleteIteration">DELETE ITERATION</button>
+                  </div>
+                  <button id="iterationData">SHOW NUMERICAL DATA</button>
+                  <button id="downloadIteration">
+                    DOWNLOAD ITERATION JSON
+                  </button>
+                  <pre
+                    id="iterationReport"
+                    class="iteration-report"
+                    hidden
+                  ></pre>
+                  <p class="note">
+                    Iterations store exact balloon meshes, transforms, seeds,
+                    slider values, curves and clipping settings. Download JSON
+                    for a portable backup; browser storage is local to this
+                    browser and site address.
+                  </p>
+                </div>
+              </details>
+            </div>
+          </section>
+        </aside>
+      </div>
+      <div class="status-bar" role="status" aria-live="polite">
+        <span class="dot"></span
+        ><span id="status">Starting the geometry engine…</span
+        ><progress id="progress" max="1" value="0" hidden></progress
+        ><button id="cancelBtn" hidden>CANCEL</button>
+      </div>
+      <footer><span>BALLOON BUILD</span><span>MODEL SPACE / XYZ</span></footer>
+    </main>
+    <dialog id="help">
+      <button id="closeHelp">CLOSE ×</button>
+      <p class="eyebrow">BALLOON BUILD / QUICK START</p>
+      <h2>From boundary to balloon field.</h2>
+      <ol>
+        <li>
+          Explore the demo, or import a closed Rhino mesh, STL, or OBJ. Choose a
+          boundary if the file has several meshes.
+        </li>
+        <li>Set count, seeds, and radius range. Generate balloons.</li>
+        <li>
+          Choose CURVE POINTS. Click and drag a point in either canvas, or use
+          its X/Y/Z arrows in 3D. Pressure updates when you release the point.
+        </li>
+        <li>
+          Choose MOVE BALLOON and drag any balloon directly, or use its axis
+          arrows. SCALE BALLOON provides uniform scale handles. On release,
+          unfrozen neighbors deform to make space. Walls and frozen balloons
+          remain constraints, and neighbors retain a small positive volume.
+        </li>
+        <li>
+          Build shell assembly or Boolean subtraction, then export. Save a
+          project to preserve geometry and settings.
+        </li>
+      </ol>
+      <p>
+        ROTATE BOUNDARY rotates the actual imported mesh around its center.
+        Select X, Y, or Z and enter exact degrees or choose a 90° / 180° preset.
+        The rings snap to 90° by default; Ring snap also offers 15°, 45°, or
+        Free. Rotation regenerates the balloon field and resets individual
+        edits. Curve-point drags also regenerate the field and reset individual
+        edits. Use ORBIT, or drag empty space, to change only the camera.
+      </p>
+      <p>
+        Pop! removes the active balloon; the slider controls the local dent on
+        its neighbors. Adjust the last pop until you make another edit. Freeze
+        locks the active balloon's shape and position; click Unfreeze to edit it
+        again. Shift/Ctrl-click several balloons or use the merge checkboxes,
+        then click Merge. Only touching or nearby balloons can form a connected
+        merged volume. Small contact gaps are filled, and internal interfaces
+        are removed. These states are included in saved projects. Reset
+        Pop/Freeze/Merge starts a fresh field while keeping the current boundary
+        and settings.
+      </p>
+      <p>
+        UNDO or Ctrl+Z reverses the last modeling or control action, including
+        all neighboring shapes changed by a movement. Up to 20 actions are
+        available. Normal text editing keeps its own Ctrl+Z behavior inside
+        input fields. Camera navigation, selection, downloads, and opening this
+        help are not undo steps. Undo history lasts for this page session and is
+        not saved in projects.
+      </p>
+      <p>
+        This is geometric form finding, not a physical material simulation.
+        Solid intersections and separating contact planes prevent overlapping
+        balloon volumes. Crowded fields can create small or empty cells; these
+        are reported.
+      </p>
+      <p>
+        The browser solver reinterprets the Grasshopper workflow using a
+        different random generator and a solid geometry kernel. It does not
+        execute RhinoCommon or reproduce the definition exactly.
+      </p>
+      <p>
+        Shell assembly preserves separate shells in one mesh. It is not a union
+        or a single solid. Boolean output is checked for valid, closed, manifold
+        topology. Failed checks show warnings but do not block mesh export when
+        a Boolean result exists. Exporting does not repair the mesh. Models are
+        processed locally.
+      </p>
+      <p>
+        Helvetica Neue LT Pro is used when installed, with Helvetica Neue,
+        Helvetica, and Arial fallbacks. A licensed webfont can be added later.
+      </p>
+    </dialog>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
