@@ -1,3 +1,5 @@
+> This is the independent local copy. See [COPY-README.md](COPY-README.md) for its separate preview, build output, and publishing setup. The GitHub URL below refers to the original website.
+
 # Balloon Build
 
 A browser-based geometric balloon design studio inspired by a supplied Grasshopper definition. Built with Three.js, Rhino3dm, and Manifold WebAssembly. Black / #21E0ED styling, Helvetica Neue LT Pro where installed, perspective and plan views.
