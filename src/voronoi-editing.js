@@ -1,7 +1,5 @@
-import {
-  validBalloonEdit,
-  scaleAxisEdit,
-} from "./balloon-edit.js";
+import { validateVoronoiLifecycle } from "./voronoi-lifecycle.js";
+import { validBalloonEdit, scaleAxisEdit } from "./balloon-edit.js";
 import * as T from "three";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { validateCurves } from "./iterations.js";
@@ -30,7 +28,9 @@ export function createVoronoiEditing({
     section
       .querySelectorAll("[for]")
       .forEach((el) => (el.htmlFor = "ve_" + el.htmlFor));
-    for (const note of section.querySelectorAll(".note:not(.scale1d-controls .note)"))
+    for (const note of section.querySelectorAll(
+      ".note:not(.scale1d-controls .note)",
+    ))
       note.textContent =
         sourceId === "curveSelect"
           ? "Up to five pink curves. Drag a complete curve with MOVE CURVE, or edit its points with CURVE POINTS. Strength and influence are shared. Enable pressure applies immediately."
@@ -48,10 +48,29 @@ export function createVoronoiEditing({
     )
     .join("");
   pane.querySelector(".voro-steps").after(tools);
+  const operations = document.createElement("div");
+  operations.className = "balloon-actions";
+  operations.setAttribute("aria-label", "Voronoi balloon operations");
+  operations.innerHTML =
+    '<button id="ve_pop" class="pop-button">Pop!</button><button id="ve_freeze" aria-pressed="false">Freeze</button><label>Pop pressure <output id="ve_popPressureValue">25%</output><input id="ve_popPressure" type="range" min="0" max="100" value="25" aria-label="Voronoi pop pressure"></label><button id="ve_restorePopped">RESTORE POPPED</button><button id="ve_undoOperation">UNDO OPERATION</button><span id="ve_operationState" class="note"></span>';
+  tools.after(operations);
+  let frozen = {},
+    popped = [],
+    popEvents = [],
+    popPressure = 0.25,
+    operationHistory = [];
+  const recordOperation = () => {
+    operationHistory.push(
+      structuredClone({ frozen, popped, popEvents, popPressure }),
+    );
+    if (operationHistory.length > 20) operationHistory.shift();
+  };
+  const isFrozen = () => !!frozen[selectedId];
   let curves = [],
     active = 0,
     point = 0,
     selectedId = null,
+    visibleZone = null,
     edits = {},
     tool = "orbit",
     drag = null,
@@ -104,6 +123,10 @@ export function createVoronoiEditing({
     ensure();
     return {
       edits: structuredClone(edits),
+      frozen: structuredClone(frozen),
+      popped: [...popped],
+      popEvents: structuredClone(popEvents),
+      popPressure,
       curves: curves.map(sample),
       pressureEnabled: $("pressureEnabled").checked,
       strength: Number($("strength").value),
@@ -182,12 +205,18 @@ export function createVoronoiEditing({
     ["curveX", "curveY", "curveZ"].forEach(
       (id, k) => ($(id).value = Number(curves[active][point][k].toFixed(4))),
     );
-    const spheres = result()?.spheres || [];
+    const spheres = (result()?.spheres || []).filter(
+      (s) => visibleZone === null || s.zone === visibleZone,
+    );
     if (!spheres.some((s) => s.id === selectedId))
       selectedId = spheres[0]?.id ?? null;
     $("balloonSelect").replaceChildren(
       ...spheres.map(
-        (s) => new Option(`BALLOON ${String(s.id + 1).padStart(2, "0")}`, s.id),
+        (s) =>
+          new Option(
+            `${s.zone !== undefined ? "ZONE " + (s.zone + 1) + " / " : ""}BALLOON ${String((s.zone !== undefined ? s.id % 150 : s.id) + 1).padStart(2, "0")}${frozen[s.id] ? " · FROZEN" : ""}`,
+            s.id,
+          ),
       ),
     );
     $("balloonSelect").value = selectedId;
@@ -199,7 +228,30 @@ export function createVoronoiEditing({
     $("balloonState").textContent =
       selectedId === null
         ? "No balloon selected."
-        : `BALLOON ${selectedId + 1} selected / original seed ${selectedId}.`;
+        : `BALLOON ${selectedId + 1} selected / original seed ${selectedId}${isFrozen() ? " · FROZEN — shape locked" : ""}.`;
+    for (const id of [
+      "moveX",
+      "moveY",
+      "moveZ",
+      "scale",
+      "scale1dAxis",
+      "scale1dFactor",
+      "applyScale1d",
+      "applyBalloonBtn",
+      "resetBalloonBtn",
+    ])
+      $(id).disabled = busy || selectedId === null || isFrozen();
+    $("pop").disabled = busy || selectedId === null || spheres.length <= 1;
+    $("freeze").disabled = busy || selectedId === null;
+    $("freeze").textContent = isFrozen() ? "Unfreeze" : "Freeze";
+    $("freeze").setAttribute("aria-pressed", isFrozen());
+    $("restorePopped").disabled = busy || !popped.length;
+    $("undoOperation").disabled = busy || !operationHistory.length;
+    $("popPressure").disabled = busy;
+    $("popPressure").value = popPressure * 100;
+    $("popPressureValue").textContent = Math.round(popPressure * 100) + "%";
+    $("operationState").textContent =
+      `${Object.keys(frozen).length} frozen · ${popped.length} popped`;
     for (const mesh of meshes)
       mesh.material.emissive?.setHex(
         mesh.userData.balloonId === selectedId ? 0x087079 : 0x000000,
@@ -229,7 +281,7 @@ export function createVoronoiEditing({
     target = null;
     if (tool === "orbit" || busy) return;
     const a = anchor();
-    if (!a) return;
+    if (!a || (!["curve", "curveMove"].includes(tool) && isFrozen())) return;
     target = tool === "curve" || tool === "curveMove" ? "curve" : "balloon";
     proxy.position.fromArray(a);
     proxy.scale.setScalar(1);
@@ -256,7 +308,7 @@ export function createVoronoiEditing({
     .querySelectorAll("button")
     .forEach((b) => (b.onclick = () => setTool(b.dataset.veTool)));
   function begin() {
-    if (!target || busy) return;
+    if (!target || busy || (target === "balloon" && isFrozen())) return;
     ensure();
     meshes
       .find((o) => o.userData.balloonId === selectedId)
@@ -535,7 +587,7 @@ export function createVoronoiEditing({
     attach();
   };
   $("applyScale1d").onclick = () => {
-    if (selectedId === null || busy) return;
+    if (selectedId === null || busy || isFrozen()) return;
     try {
       edits[selectedId] = scaleAxisEdit(
         edits[selectedId] || [0, 0, 0, 1],
@@ -548,6 +600,7 @@ export function createVoronoiEditing({
     }
   };
   $("applyBalloonBtn").onclick = () => {
+    if (selectedId === null || busy || isFrozen()) return;
     const values = ["moveX", "moveY", "moveZ", "scale"].map((id) =>
       Number($(id).value),
     );
@@ -559,7 +612,56 @@ export function createVoronoiEditing({
     commit();
   };
   $("resetBalloonBtn").onclick = () => {
+    if (selectedId === null || busy || isFrozen()) return;
     delete edits[selectedId];
+    commit();
+  };
+  $("freeze").onclick = () => {
+    if (busy || selectedId === null) return;
+    const balloon = result()?.spheres.find((s) => s.id === selectedId);
+    if (!balloon) return;
+    recordOperation();
+    if (isFrozen()) delete frozen[selectedId];
+    else
+      frozen[selectedId] = structuredClone({
+        center: balloon.center,
+        radius: balloon.radius,
+        axisScale: balloon.axisScale ?? [1, 1, 1],
+        ...(balloon.raw ? { raw: balloon.raw } : {}),
+      });
+    commit();
+  };
+  $("pop").onclick = () => {
+    const balloon = result()?.spheres.find((s) => s.id === selectedId);
+    if (busy || !balloon || result().spheres.length <= 1) return;
+    recordOperation();
+    popped.push(selectedId);
+    delete frozen[selectedId];
+    popEvents.push({
+      center: [...balloon.center],
+      radius: balloon.radius * Math.max(...(balloon.axisScale ?? [1, 1, 1])),
+      zone: balloon.zone,
+    });
+    commit();
+  };
+  $("restorePopped").onclick = () => {
+    if (busy) return;
+    recordOperation();
+    popped = [];
+    popEvents = [];
+    commit();
+  };
+  $("undoOperation").onclick = () => {
+    if (busy || !operationHistory.length) return;
+    ({ frozen, popped, popEvents, popPressure } = operationHistory.pop());
+    commit();
+  };
+  $("popPressure").oninput = () =>
+    ($("popPressureValue").textContent = $("popPressure").value + "%");
+  $("popPressure").onchange = () => {
+    if (busy) return;
+    recordOperation();
+    popPressure = Number($("popPressure").value) / 100;
     commit();
   };
   $("curveFile").onchange = async () => {
@@ -616,17 +718,28 @@ export function createVoronoiEditing({
       curves = [];
       resetCurve();
       edits = {};
+      frozen = {};
+      popped = [];
+      popEvents = [];
+      popPressure = 0.25;
+      operationHistory = [];
       $("pressureEnabled").checked = false;
       ui();
       paint();
       return;
     }
+    validateVoronoiLifecycle(data);
     const nextCurves = validateCurves(data.curves);
     const nextEdits = data.edits || {};
     if (Object.values(nextEdits).some((e) => !validBalloonEdit(e)))
       throw Error("Invalid saved balloon edits.");
     curves = nextCurves;
     edits = structuredClone(nextEdits);
+    frozen = structuredClone(data.frozen ?? {});
+    popped = [...(data.popped ?? [])];
+    popEvents = structuredClone(data.popEvents ?? []);
+    popPressure = data.popPressure ?? 0.25;
+    operationHistory = [];
     active = Math.max(0, Math.min(curves.length - 1, Number(data.active) || 0));
     point = Math.max(
       0,
@@ -653,6 +766,15 @@ export function createVoronoiEditing({
   paint();
   return {
     settings,
+    setVisibleZone(zone) {
+      visibleZone = zone;
+    },
+    selectZone(zone) {
+      selectedId =
+        result()?.spheres.find((s) => s.zone === zone)?.id ?? selectedId;
+      ui();
+      paint();
+    },
     update,
     save: () => ({
       active,
@@ -660,6 +782,10 @@ export function createVoronoiEditing({
       selectedId,
       tool,
       curves: structuredClone(curves),
+      frozen: structuredClone(frozen),
+      popped: [...popped],
+      popEvents: structuredClone(popEvents),
+      popPressure,
       edits: structuredClone(edits),
       strength: Number($("strength").value),
       influence: Number($("influence").value),
@@ -681,6 +807,7 @@ export function createVoronoiEditing({
     setBusy(value) {
       busy = value;
       transform.enabled = !value;
+      ui();
       if (value) transform.detach();
       else attach();
     },

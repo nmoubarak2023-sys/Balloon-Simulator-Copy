@@ -84,11 +84,12 @@ export function initColumns(rhino, getVoronoi) {
   function fit() {
     if (!source) return;
     const { width: w, height: h, floor } = source.params;
-    orbit.target.set(w / 2, h / 2, floor);
-    camera.position.set(w * 1.1, -w * 0.9, w * 0.9);
+    const [x0, y0] = source.params.origin ?? [0, 0];
+    orbit.target.set(x0 + w / 2, y0 + h / 2, floor);
+    camera.position.set(x0 + w * 1.1, y0 - w * 0.9, floor + w * 0.9);
     camera.lookAt(orbit.target);
-    plan.position.set(w / 2, h / 2, w * 3);
-    plan.lookAt(w / 2, h / 2, floor);
+    plan.position.set(x0 + w / 2, y0 + h / 2, floor + w * 3);
+    plan.lookAt(x0 + w / 2, y0 + h / 2, floor);
     resize();
   }
   function clear(group) {

@@ -171,7 +171,10 @@ async function task(message, fn) {
     .querySelectorAll(
       ".controls button,.controls input,.controls select,.canvas-tools button,.balloon-actions button,.balloon-actions input,.rotation-controls button,.rotation-controls input,.rotation-controls select,#curveEditBtn",
     )
-    .forEach((e) => (e.disabled = true));
+    .forEach((e) => {
+      if (!e.closest("#voronoiWorkspace,#partyWorkspace,#columnWorkspace"))
+        e.disabled = true;
+    });
   status(message);
   try {
     await fn();
@@ -187,7 +190,10 @@ async function task(message, fn) {
       .querySelectorAll(
         ".controls button,.controls input,.controls select,.canvas-tools button,.balloon-actions button,.balloon-actions input,.rotation-controls button,.rotation-controls input,.rotation-controls select,#curveEditBtn",
       )
-      .forEach((e) => (e.disabled = false));
+      .forEach((e) => {
+        if (!e.closest("#voronoiWorkspace,#partyWorkspace,#columnWorkspace"))
+          e.disabled = false;
+      });
     updateActionButtons();
     $("addCurve").disabled = curves.length >= 5;
     $("removeCurve").disabled = curves.length <= 1;

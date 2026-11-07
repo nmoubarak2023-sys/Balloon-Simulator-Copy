@@ -1,3 +1,5 @@
+import { inLoops, loopBounds } from "./zones.js";
+import { validateVoronoiLifecycle } from "./voronoi-lifecycle.js";
 import { validBalloonEdit } from "./balloon-edit.js";
 import cdt2d from "cdt2d";
 import { random, closestPolyline } from "./engine.js";
@@ -5,6 +7,7 @@ import * as T from "three";
 import { MeshBVH } from "three-mesh-bvh";
 import { meshQuality, signedVolume } from "./mesh-quality.js";
 export function voronoiBuild(m, p) {
+  validateVoronoiLifecycle(p);
   const {
     width: w,
     height: h,
@@ -21,12 +24,24 @@ export function voronoiBuild(m, p) {
   } = p;
   if (
     !Object.entries(p)
-      .filter(([k]) => !["curves", "edits", "pressureEnabled"].includes(k))
+      .filter(
+        ([k]) =>
+          ![
+            "curves",
+            "edits",
+            "pressureEnabled",
+            "popped",
+            "frozen",
+            "popEvents",
+            "domain",
+          ].includes(k),
+      )
       .every(([, v]) => Number.isFinite(v)) ||
     !Number.isInteger(selected) ||
     !Number.isInteger(smoothing) ||
-    ![40, 80, 160].includes(w) ||
-    h !== w * 0.625 ||
+    (p.domain
+      ? !Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0
+      : ![40, 80, 160].includes(w) || h !== w * 0.625) ||
     !Number.isInteger(count) ||
     count < 1 ||
     count > 150 ||
@@ -75,14 +90,46 @@ export function voronoiBuild(m, p) {
     throw Error(
       "Pressure strength must be nonnegative and influence must be positive.",
     );
+  const domainLoops = p.domain?.loops;
+  if (
+    domainLoops &&
+    (!Array.isArray(domainLoops) ||
+      !domainLoops.length ||
+      domainLoops.some(
+        (loop) =>
+          !Array.isArray(loop) ||
+          loop.length < 3 ||
+          loop.some(
+            (v) =>
+              !Array.isArray(v) || v.length !== 2 || !v.every(Number.isFinite),
+          ),
+      ))
+  )
+    throw Error("Invalid zone boundary.");
+  const domainBounds = domainLoops
+      ? loopBounds(domainLoops)
+      : { min: [0, 0], max: [w, h] },
+    [x0, y0] = domainBounds.min;
   const rng = random(seed),
-    points = Array.from({ length: count }, () => [rng() * w, rng() * h]);
+    points = [];
+  for (
+    let attempts = 0;
+    points.length < count && attempts < count * 20000;
+    attempts++
+  ) {
+    const point = [x0 + rng() * w, y0 + rng() * h];
+    if (!domainLoops || inLoops(point, domainLoops)) points.push(point);
+  }
+  if (points.length !== count)
+    throw Error(
+      "This zone is too narrow to populate reliably. Simplify its boundary or lower the point count.",
+    );
   const cells = points.map((a, i) => {
     let poly = [
-      [0, 0],
-      [w, 0],
-      [w, h],
-      [0, h],
+      [x0, y0],
+      [x0 + w, y0],
+      [x0 + w, y0 + h],
+      [x0, y0 + h],
     ];
     points.forEach((b, j) => {
       if (i === j) return;
@@ -105,7 +152,33 @@ export function voronoiBuild(m, p) {
     });
     return poly;
   });
-  const ids = points
+  let cellLoops = null;
+  if (domainLoops) {
+    const region = new m.CrossSection(domainLoops, "EvenOdd");
+    try {
+      cellLoops = cells.map((poly) => {
+        if (poly.length < 3) return [];
+        const cell = new m.CrossSection([poly], "EvenOdd");
+        let cut;
+        try {
+          cut = cell.intersect(region);
+          return cut.toPolygons();
+        } finally {
+          cut?.delete();
+          cell.delete();
+        }
+      });
+    } finally {
+      region.delete();
+    }
+    cells.forEach((_, i) => {
+      cells[i] = cellLoops[i].reduce(
+        (big, loop) => (loop.length > big.length ? loop : big),
+        [],
+      );
+    });
+  }
+  const selectedIds = points
     .map((a, i) => ({
       i,
       d: (a[0] - points[index][0]) ** 2 + (a[1] - points[index][1]) ** 2,
@@ -114,16 +187,49 @@ export function voronoiBuild(m, p) {
     .slice(0, selected)
     .map((a) => a.i);
   const rr = random(radiusSeed),
-    spheres = ids.map((id) => ({
+    generated = selectedIds.map((id) => ({
       id,
       axisScale: [0, 1, 2].map((k) => p.edits?.[id]?.[4 + k] ?? 1),
       center: points[id]
         .map((v, k) => v + (p.edits?.[id]?.[k] || 0))
-        .concat(p.edits?.[id]?.[2] || 0),
+        .concat((p.domain?.elevation ?? 0) + (p.edits?.[id]?.[2] || 0)),
       radius:
         (radiusMin + rr() * (radiusMax - radiusMin)) *
         (p.edits?.[id]?.[3] ?? 1),
     }));
+  const frozen = p.frozen ?? {},
+    popped = new Set(p.popped ?? []);
+  const spheres = generated
+    .filter((s) => !popped.has(s.id))
+    .map((s) =>
+      frozen[s.id]
+        ? { ...structuredClone(frozen[s.id]), id: s.id, frozen: true }
+        : s,
+    );
+  for (const [id, s] of Object.entries(frozen))
+    if (!popped.has(Number(id)) && !spheres.some((b) => b.id === Number(id)))
+      spheres.push({ ...structuredClone(s), id: Number(id), frozen: true });
+  const ids = spheres.map((s) => s.id);
+  if (!spheres.length && p.domain)
+    return {
+      points,
+      cells,
+      cellLoops,
+      ids,
+      spheres,
+      raw: { positions: new Float64Array(), indices: new Uint32Array() },
+      loops: [],
+      quality: meshQuality({
+        positions: new Float64Array(),
+        indices: new Uint32Array(),
+      }),
+      components: 0,
+      volume: 0,
+      closed: false,
+      params: p,
+    };
+  if (!spheres.length)
+    throw Error("At least one balloon must remain. Restore a popped balloon.");
   for (const s of spheres)
     if (
       !s.center.every(Number.isFinite) ||
@@ -135,15 +241,50 @@ export function voronoiBuild(m, p) {
     disposables = [],
     own = (x) => (owned.push(x), x);
   try {
-    const rectangle = own(m.CrossSection.square([w, h]));
+    const rectangle = own(
+      domainLoops
+        ? new m.CrossSection(domainLoops, "EvenOdd")
+        : m.CrossSection.square([w, h]),
+    );
+    const prismHeight =
+      Math.max(
+        w,
+        h,
+        ...spheres.map((s) => s.radius * Math.max(...s.axisScale)),
+        Math.abs(floor),
+        1,
+      ) * 20;
+    const prism = domainLoops
+      ? own(
+          own(rectangle.extrude(prismHeight * 2)).translate([
+            0,
+            0,
+            (p.domain.elevation ?? 0) - prismHeight,
+          ]),
+        )
+      : null;
     const pressure = !!p.pressureEnabled && p.strength > 0 && p.curves?.length;
     const surfaces =
-      pressure || spheres.some((s) => s.axisScale.some((v) => v !== 1))
+      domainLoops ||
+      pressure ||
+      (p.popEvents?.length && p.popPressure > 0) ||
+      spheres.some((s) => s.frozen || s.axisScale.some((v) => v !== 1))
         ? spheres.map((s) => {
-            let solid = own(
-              m.Manifold.sphere(s.radius, 80).translate(s.center),
-            );
-            if (pressure)
+            const savedRaw = s.frozen ? s.raw : null;
+            let solid = savedRaw
+              ? own(
+                  new m.Manifold(
+                    new m.Mesh({
+                      numProp: 3,
+                      vertProperties: new Float32Array(savedRaw.positions),
+                      triVerts: new Uint32Array(savedRaw.indices),
+                    }),
+                  ),
+                )
+              : own(m.Manifold.sphere(s.radius, 80).translate(s.center));
+            if (solid.status() !== "NoError")
+              throw Error("Frozen balloon mesh is invalid.");
+            if (pressure && !s.frozen)
               solid = own(
                 solid.warp((v) => {
                   const d = closestPolyline(v, p.curves),
@@ -156,7 +297,30 @@ export function voronoiBuild(m, p) {
                       (v[k] - s.center[k]) * (1 - depth / s.radius);
                 }),
               );
-            if (s.axisScale.some((v) => v !== 1))
+            if (!s.frozen && p.popEvents?.length && p.popPressure > 0)
+              solid = own(
+                solid.warp((v) => {
+                  const depth = p.popEvents.reduce((sum, e) => {
+                    const distance = Math.max(
+                      0,
+                      Math.hypot(...v.map((x, k) => x - e.center[k])) -
+                        e.radius,
+                    );
+                    const u = Math.max(
+                      0,
+                      1 - distance / Math.max(e.radius, s.radius),
+                    );
+                    return (
+                      sum +
+                      p.popPressure * s.radius * 0.12 * u * u * (3 - 2 * u)
+                    );
+                  }, 0);
+                  const scale = 1 - Math.min(0.35, depth / s.radius);
+                  for (let k = 0; k < 3; k++)
+                    v[k] = s.center[k] + (v[k] - s.center[k]) * scale;
+                }),
+              );
+            if (!savedRaw && s.axisScale.some((v) => v !== 1))
               solid = own(
                 own(
                   own(solid.translate(s.center.map((v) => -v))).scale(
@@ -164,6 +328,14 @@ export function voronoiBuild(m, p) {
                   ),
                 ).translate(s.center),
               );
+            if (prism && !savedRaw) solid = own(solid.intersect(prism));
+            if (solid.isEmpty())
+              throw Error(
+                `Balloon ${s.id + 1} is outside its zone. Move it back or reset it.`,
+              );
+            s.analyticSurface = s.frozen
+              ? !!s.analyticSurface
+              : !pressure && !(p.popEvents?.length && p.popPressure > 0);
             const mesh = solid.getMesh(),
               g = new T.BufferGeometry();
             g.setAttribute(
@@ -179,11 +351,15 @@ export function voronoiBuild(m, p) {
               positions: new Float32Array(mesh.vertProperties),
               indices: new Uint32Array(mesh.triVerts),
             };
-            s.raw = raw;
+            s.raw = savedRaw ? structuredClone(savedRaw) : raw;
             return {
               solid,
               bvh,
-              top: s.center[2] + s.radius * s.axisScale[2] + 1,
+              top:
+                raw.positions.reduce(
+                  (max, v, i) => (i % 3 === 2 ? Math.max(max, v) : max),
+                  -Infinity,
+                ) + 1,
             };
           })
         : null;
@@ -199,13 +375,17 @@ export function voronoiBuild(m, p) {
           ).translate(s.center.slice(0, 2)),
         ),
       );
-    const footprint = own(
+    let footprint = own(
       own(
         m.CrossSection.union(
           surfaces ? surfaces.map((s) => own(s.solid.slice(floor))) : circles,
         ),
       ).intersect(rectangle),
     );
+    if (domainLoops)
+      footprint = own(
+        footprint.simplify(Math.max(1e-5, Math.max(w, h) * 1e-7)),
+      );
     const loops = footprint.toPolygons();
     if (!loops.length)
       throw Error("The floor plane does not intersect the balloons.");
@@ -259,11 +439,15 @@ export function voronoiBuild(m, p) {
       return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
     };
     for (
-      let row = 0, y = spacing * 0.5;
-      y < h;
+      let row = 0, y = y0 + spacing * 0.5;
+      y < y0 + h;
       y += (spacing * Math.sqrt(3)) / 2, row++
     )
-      for (let x = spacing * (row % 2 ? 0.5 : 1); x < w; x += spacing) {
+      for (
+        let x = x0 + spacing * (row % 2 ? 0.5 : 1);
+        x < x0 + w;
+        x += spacing
+      ) {
         const p = [x, y];
         if (
           inside(p) &&
@@ -298,7 +482,7 @@ export function voronoiBuild(m, p) {
       Math.max(
         floor,
         ...spheres.map((s, i) => {
-          if (surfaces) {
+          if (surfaces && !s.analyticSurface) {
             const hit = surfaces[i].bvh.raycastFirst(
               new T.Ray(
                 new T.Vector3(x, y, surfaces[i].top),
@@ -308,9 +492,14 @@ export function voronoiBuild(m, p) {
             );
             return hit ? hit.point.z : -Infinity;
           }
+          const [sx, sy, sz] = s.axisScale ?? [1, 1, 1];
           const q =
-            s.radius ** 2 - (x - s.center[0]) ** 2 - (y - s.center[1]) ** 2;
-          return q >= 0 ? s.center[2] + Math.sqrt(q) : -Infinity;
+            1 -
+            ((x - s.center[0]) / (s.radius * sx)) ** 2 -
+            ((y - s.center[1]) / (s.radius * sy)) ** 2;
+          return q >= 0
+            ? s.center[2] + s.radius * sz * Math.sqrt(q)
+            : -Infinity;
         }),
       ),
     );
@@ -319,8 +508,40 @@ export function voronoiBuild(m, p) {
     for (const i of boundary) {
       const [x, y] = xy[i];
       if (
-        Math.min(Math.abs(x), Math.abs(x - w), Math.abs(y), Math.abs(y - h)) >
-        1e-6
+        domainLoops &&
+        spheres.every((s) => s.analyticSurface) &&
+        !domainLoops.some((loop) =>
+          loop.some(
+            (a, j) => distance([x, y], a, loop[(j + 1) % loop.length]) < 1e-4,
+          ),
+        )
+      ) {
+        const heights = spheres
+          .filter((s) => {
+            const [sx, sy, sz] = s.axisScale;
+            const q = 1 - ((floor - s.center[2]) / (s.radius * sz)) ** 2;
+            return (
+              q >= 0 &&
+              Math.abs(
+                Math.hypot(
+                  (x - s.center[0]) / (s.radius * sx),
+                  (y - s.center[1]) / (s.radius * sy),
+                ) - Math.sqrt(q),
+              ) <
+                spacing / (2 * s.radius * Math.max(sx, sy))
+            );
+          })
+          .map((s) => s.center[2] + Math.abs(floor - s.center[2]));
+        if (heights.length) z[i] = Math.max(floor, ...heights);
+      } else if (
+        domainLoops
+          ? false
+          : Math.min(
+              Math.abs(x),
+              Math.abs(x - w),
+              Math.abs(y),
+              Math.abs(y - h),
+            ) > 1e-6
       )
         z[i] = surfaces
           ? Math.max(floor, z[i])
@@ -402,6 +623,7 @@ export function voronoiBuild(m, p) {
       raw,
       points,
       cells,
+      ...(cellLoops ? { cellLoops } : {}),
       ids,
       spheres,
       loops,
