@@ -1270,3 +1270,50 @@ footer {
 .geometry-message {
   overflow-wrap: anywhere;
 }
+
+.floor-toolbar {
+  margin: 0 0 24px;
+  padding: 16px 20px;
+  border: 1px solid #21e0ed66;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: #050909;
+}
+.floor-toolbar strong {
+  color: #21e0ed;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+}
+.floor-toolbar > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.floor-toolbar select {
+  width: auto;
+  min-width: 110px;
+}
+.floor-toolbar #vFloorVisibility {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.floor-toolbar #vFloorVisibility label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.floor-toolbar input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+.floor-toolbar > p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.floor-toolbar #vProjectMessage:empty {
+  display: none;
+}

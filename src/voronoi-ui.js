@@ -253,7 +253,17 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
   let zonePickTargets = [];
   const floorControls = document.createElement("div");
   floorControls.innerHTML = `<label>Active floor<select id="vFloor">${floorState.map((f, i) => `<option value="${i}">${f.name}</option>`).join("")}</select></label><div id="vFloorVisibility"></div><label><input type="checkbox" id="vIsolateZone"> Isolate active zone</label><p class="note">Import an outline into each floor separately. Rhino elevations are retained; outlines at Z=0 are stacked at 20 ft intervals. Each floor keeps its own zones, balloons and edits.</p>`;
-  pane.querySelector(".voro-controls").prepend(floorControls);
+  floorControls.className = "floor-toolbar";
+  floorControls.setAttribute("aria-label", "Building floors");
+  floorControls.insertAdjacentHTML(
+    "afterbegin",
+    "<strong>BUILDING FLOORS</strong>",
+  );
+  floorControls.insertAdjacentHTML(
+    "beforeend",
+    '<label class="button" for="vLoad">OPEN BUILDING PROJECT .JSON ↗</label><p id="vProjectMessage" role="status" class="note"></p>',
+  );
+  pane.querySelector(".voro-layout").before(floorControls);
   floorState.forEach((f, i) => {
     const label = document.createElement("label"),
       check = document.createElement("input");
@@ -1235,6 +1245,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       await fn();
     } catch (e) {
       $("vStatus").textContent = e.message;
+      $("vProjectMessage").textContent = e.message;
     }
   };
   $("vObj").onclick = guarded(() => {
@@ -1271,8 +1282,11 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     ),
   );
   $("vLoad").onchange = guarded(async () => {
+    if (pending)
+      throw Error("Wait for generation to finish before opening a project.");
     const file = $("vLoad").files[0];
     if (!file) return;
+    $("vProjectMessage").textContent = `Opening ${file.name}…`;
     const data = JSON.parse(await file.text());
     if (data.format !== "voronoi-balloons")
       throw Error("Open a Voronoi Balloons project.");
@@ -1286,8 +1300,27 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     }
     zoneUI(!!boundary);
     if (data.building) loadBuilding(data.building);
+    let balloonCount = data.building
+      ? data.building.floors.reduce(
+          (n, f) => n + (f.snapshot?.result?.spheres?.length ?? 0),
+          0,
+        )
+      : (data.spheres?.length ?? 0);
+    const loadedFloors = data.building
+      ? data.building.floors.filter(
+          (f) =>
+            f.snapshot?.params.boundary ||
+            f.snapshot?.result?.raw.indices.length,
+        ).length
+      : 1;
+    $("vProjectMessage").textContent =
+      `Opened ${file.name}: ${loadedFloors} loaded floor(s), ${balloonCount} saved balloon(s).${balloonCount ? "" : " This project has no balloons yet. Use Populate All Zones on This Floor to create them."}`;
+    $("vLoad").value = "";
     fitNext = true;
-    generate();
+    if (data.building && result) {
+      draw();
+      updateFloorReport();
+    } else generate();
   });
   mountGeometryLibrary({
     workspace: "voronoi",
