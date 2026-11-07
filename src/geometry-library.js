@@ -68,6 +68,7 @@ export function canvasThumbnail(renderer, scene, camera) {
 }
 
 export function mountGeometryLibrary({
+  initiallyOpen = true,
   workspace,
   container,
   save,
@@ -77,7 +78,7 @@ export function mountGeometryLibrary({
   const panel = document.createElement("details");
   panel.className = "geometry-library";
   panel.id = `saved-geometry-${workspace}`;
-  panel.open = true;
+  panel.open = initiallyOpen;
   panel.innerHTML =
     '<summary>SAVED GEOMETRY</summary><div class="section-body"><label>Geometry name<input class="geometry-name" type="text" maxlength="100" placeholder="Name this geometry"></label><button class="geometry-save primary">SAVE GEOMETRY ↗</button><p class="note">Saved in this browser for this website address. Saved entries survive refresh. Download a project JSON for a portable backup.</p><label class="check"><input class="geometry-trash" type="checkbox"> Show removed geometries</label><div class="geometry-list"></div><p class="geometry-message note" role="status"></p></div>';
   container.prepend(panel);
@@ -91,7 +92,7 @@ export function mountGeometryLibrary({
   shortcut.className = "geometry-shortcut";
   shortcut.textContent = "SAVED GEOMETRY";
   shortcut.setAttribute("aria-controls", panel.id);
-  shortcut.setAttribute("aria-expanded", "true");
+  shortcut.setAttribute("aria-expanded", String(initiallyOpen));
   shortcut.onclick = () => {
     panel.open = true;
     panel.scrollIntoView({ block: "nearest", behavior: "smooth" });

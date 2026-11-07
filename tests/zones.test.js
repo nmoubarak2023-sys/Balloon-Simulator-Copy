@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import M from "manifold-3d";
 import rhino3dm from "rhino3dm";
 import { partitionCurves, demoBoundary, inLoops } from "../src/zones.js";
-import { readBoundaryCurves } from "../src/rhino-zones.js";
+import { readBoundaryCurves, readBuildingCurves } from "../src/rhino-zones.js";
 import {
   zonedVoronoiBuild,
   defaultZoneSettings,
@@ -267,4 +267,222 @@ test("only explicitly populated zones generate balloons; empty imports remain em
     first.spheres,
   );
   assert.ok(both.spheres.some((s) => s.zone === 0));
+});
+
+test("building import sorts shuffled curves bottom-to-top and partitions each level independently", () => {
+  const doc = new r.File3dm();
+  doc.settings().modelUnitSystem = r.UnitSystem.Feet;
+  for (const z of [48, -12, 84, 0, 24, 60]) {
+    const width = 30 + (z + 12) / 12;
+    for (const points of [
+      [
+        [0, 0, z],
+        [width, 0, z],
+        [width, 20, z],
+        [0, 20, z],
+        [0, 0, z],
+      ],
+      [
+        [width / 2, 0, z],
+        [width / 2, 20, z],
+      ],
+    ]) {
+      const c = new r.PolylineCurve(points);
+      doc.objects().addCurve(c, null);
+      c.delete();
+    }
+  }
+  const bytes = doc.toByteArray(),
+    building = readBuildingCurves(r, bytes);
+  doc.delete();
+  assert.deepEqual(
+    building.floors.map((f) => f.elevation),
+    [-12, 0, 24, 48, 60, 84],
+  );
+  for (const floor of building.floors) {
+    const b = partitionCurves(floor.curves, { elevation: floor.elevation });
+    assert.equal(b.zones.length, 2);
+    assert.equal(b.elevation, floor.elevation);
+    assert.equal(b.bounds.width, 30 + (floor.elevation + 12) / 12);
+  }
+  assert.throws(() => readBoundaryCurves(r, bytes), /one horizontal/);
+});
+test("building importer rejects a sloping curve instead of assigning it to an arbitrary floor", () => {
+  const doc = new r.File3dm();
+  doc.settings().modelUnitSystem = r.UnitSystem.Feet;
+  const c = new r.PolylineCurve([
+    [0, 0, 0],
+    [10, 0, 10],
+  ]);
+  doc.objects().addCurve(c, null);
+  c.delete();
+  const bytes = doc.toByteArray();
+  doc.delete();
+  assert.throws(() => readBuildingCurves(r, bytes), /horizontal/);
+});
+test("unobstructed balloons use every zone seed and remain full beyond zone and floor edges", () => {
+  const boundary = demoBoundary(),
+    zoneSettings = defaultZoneSettings(boundary).map((c) => ({
+      ...c,
+      count: 4,
+      selected: 1,
+      radiusMin: 8,
+      radiusMax: 8,
+    }));
+  const result = zonedVoronoiBuild(m, {
+    boundary,
+    zoneSettings,
+    populatedZones: [0],
+    floor: 0,
+    spacing: 2,
+    smoothing: 4,
+    unclippedBalloons: true,
+  });
+  assert.equal(result.spheres.length, 4);
+  assert.ok(
+    result.spheres.some((s) =>
+      Array.from({ length: s.raw.positions.length / 3 }, (_, i) => [
+        ...s.raw.positions.slice(i * 3, i * 3 + 3),
+      ]).some((p) => !inLoops(p, boundary.zones[0].loops)),
+    ),
+  );
+  for (const sphere of result.spheres) {
+    const z = Array.from(sphere.raw.positions).filter((_, i) => i % 3 === 2);
+    assert.ok(Math.min(...z) < sphere.center[2] - 7.9);
+    assert.ok(Math.max(...z) > sphere.center[2] + 7.9);
+  }
+  assert.equal(result.quality.boundaryEdges, 0);
+});
+
+test("rounded enclosure retains both halves of the actual balloon instead of flattening at the floor", () => {
+  const boundary = demoBoundary(),
+    zoneSettings = defaultZoneSettings(boundary).map((c) => ({
+      ...c,
+      count: 1,
+      selected: 1,
+      radiusMin: 8,
+      radiusMax: 8,
+    }));
+  const p = {
+    boundary,
+    zoneSettings,
+    populatedZones: [0],
+    floor: 0,
+    spacing: 2,
+    smoothing: 20,
+    unclippedBalloons: true,
+  };
+  const result = zonedVoronoiBuild(m, p),
+    zs = Array.from(result.raw.positions).filter((_, i) => i % 3 === 2);
+  assert.ok(Math.min(...zs) < -7.99);
+  assert.ok(Math.max(...zs) > 7.99);
+  assert.ok(
+    Math.abs(result.volume - (4 / 3) * Math.PI * 8 ** 3) /
+      ((4 / 3) * Math.PI * 8 ** 3) <
+      0.01,
+  );
+  const unchanged = zonedVoronoiBuild(m, { ...p, spacing: 5, smoothing: 0 });
+  assert.deepEqual(result.raw, unchanged.raw);
+  assert.equal(result.quality.boundaryEdges, 0);
+  assert.equal(result.closed, true);
+});
+
+test("new floors have independent deterministic point and radius seeds", () => {
+  const b = demoBoundary(),
+    first = defaultZoneSettings(b, 0),
+    second = defaultZoneSettings(b, 1);
+  assert.deepEqual(first, defaultZoneSettings(b, 0));
+  for (let i = 0; i < first.length; i++) {
+    assert.notEqual(first[i].seed, second[i].seed);
+    assert.notEqual(first[i].radiusSeed, second[i].radiusSeed);
+  }
+  const original = structuredClone(first);
+  second[0].count = 2;
+  assert.deepEqual(first, original);
+});
+
+test("Pop and curve pressure both deform the actual rounded enclosure and leave other floor input untouched", () => {
+  const boundary = demoBoundary(),
+    p = {
+      boundary,
+      zoneSettings: defaultZoneSettings(boundary).map((c) => ({
+        ...c,
+        count: 4,
+        selected: 4,
+        radiusMin: 8,
+        radiusMax: 8,
+      })),
+      populatedZones: [0],
+      floor: 0,
+      spacing: 2,
+      smoothing: 0,
+      unclippedBalloons: true,
+    };
+  const original = structuredClone(p),
+    base = zonedVoronoiBuild(m, p),
+    removed = base.spheres[0];
+  const pop = zonedVoronoiBuild(m, {
+    ...p,
+    popped: [removed.id],
+    popPressure: 1,
+    popEvents: [{ center: removed.center, radius: removed.radius, zone: 0 }],
+  });
+  assert.equal(pop.spheres.length, 3);
+  assert.ok(!pop.spheres.some((s) => s.id === removed.id));
+  const survivor = base.spheres[1];
+  assert.notDeepEqual(
+    pop.spheres.find((s) => s.id === survivor.id).raw,
+    survivor.raw,
+  );
+  const curve = [
+    removed.center.map((v, k) => (k === 0 ? v - 20 : v)),
+    removed.center.map((v, k) => (k === 0 ? v + 20 : v)),
+  ];
+  const pressured = zonedVoronoiBuild(m, {
+    ...p,
+    pressureEnabled: true,
+    strength: 3,
+    influence: 50,
+    curves: [curve],
+  });
+  assert.notDeepEqual(pressured.raw, base.raw);
+  assert.notDeepEqual(pressured.spheres[0].raw, base.spheres[0].raw);
+  assert.ok(pressured.volume < base.volume);
+  assert.equal(pressured.closed, true);
+  assert.deepEqual(p, original);
+});
+
+test("floor plate cuts only the underside while retaining rounded geometry outside the zone", () => {
+  const boundary = demoBoundary();
+  boundary.elevation = 20;
+  const p = {
+    boundary,
+    zoneSettings: defaultZoneSettings(boundary).map((c) => ({
+      ...c,
+      count: 1,
+      selected: 1,
+      radiusMin: 8,
+      radiusMax: 8,
+    })),
+    populatedZones: [0],
+    floor: 20,
+    spacing: 2,
+    smoothing: 0,
+    unclippedBalloons: true,
+    clipFloor: true,
+  };
+  const result = zonedVoronoiBuild(m, p),
+    s = result.spheres[0];
+  for (const mesh of [result.raw, s.raw]) {
+    const zs = Array.from(mesh.positions).filter((_, i) => i % 3 === 2);
+    assert.ok(Math.min(...zs) >= 20 - 1e-5);
+    assert.ok(Math.max(...zs) > 27.99);
+  }
+  assert.ok(
+    Array.from({ length: s.raw.positions.length / 3 }, (_, i) =>
+      Array.from(s.raw.positions.slice(i * 3, i * 3 + 3)),
+    ).some((p) => !inLoops(p, boundary.zones[0].loops)),
+  );
+  assert.equal(result.closed, true);
+  assert.equal(result.quality.boundaryEdges, 0);
 });

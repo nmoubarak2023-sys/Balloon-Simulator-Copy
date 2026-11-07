@@ -34,6 +34,8 @@ export function voronoiBuild(m, p) {
             "frozen",
             "popEvents",
             "domain",
+            "unclippedBalloons",
+            "clipFloor",
           ].includes(k),
       )
       .every(([, v]) => Number.isFinite(v)) ||
@@ -254,17 +256,19 @@ export function voronoiBuild(m, p) {
         Math.abs(floor),
         1,
       ) * 20;
-    const prism = domainLoops
-      ? own(
-          own(rectangle.extrude(prismHeight * 2)).translate([
-            0,
-            0,
-            (p.domain.elevation ?? 0) - prismHeight,
-          ]),
-        )
-      : null;
+    const prism =
+      domainLoops && !p.unclippedBalloons
+        ? own(
+            own(rectangle.extrude(prismHeight * 2)).translate([
+              0,
+              0,
+              (p.domain.elevation ?? 0) - prismHeight,
+            ]),
+          )
+        : null;
     const pressure = !!p.pressureEnabled && p.strength > 0 && p.curves?.length;
     const surfaces =
+      p.unclippedBalloons ||
       domainLoops ||
       pressure ||
       (p.popEvents?.length && p.popPressure > 0) ||
@@ -336,6 +340,7 @@ export function voronoiBuild(m, p) {
             s.analyticSurface = s.frozen
               ? !!s.analyticSurface
               : !pressure && !(p.popEvents?.length && p.popPressure > 0);
+            if (p.clipFloor) solid = own(solid.trimByPlane([0, 0, 1], floor));
             const mesh = solid.getMesh(),
               g = new T.BufferGeometry();
             g.setAttribute(
@@ -351,7 +356,7 @@ export function voronoiBuild(m, p) {
               positions: new Float32Array(mesh.vertProperties),
               indices: new Uint32Array(mesh.triVerts),
             };
-            s.raw = savedRaw ? structuredClone(savedRaw) : raw;
+            s.raw = savedRaw && !p.clipFloor ? structuredClone(savedRaw) : raw;
             return {
               solid,
               bvh,
@@ -363,6 +368,43 @@ export function voronoiBuild(m, p) {
             };
           })
         : null;
+    if (p.unclippedBalloons) {
+      // Preserve the prepared cutters themselves, rather than resampling a roof.
+      const union = own(m.Manifold.union(surfaces.map((s) => s.solid)));
+      if (union.status() !== "NoError")
+        throw Error("Could not join the rounded balloon surfaces.");
+      const mesh = union.getMesh(),
+        positions = new Float64Array(mesh.numVert * 3);
+      for (let i = 0; i < mesh.numVert; i++)
+        for (let k = 0; k < 3; k++)
+          positions[i * 3 + k] = mesh.vertProperties[i * mesh.numProp + k];
+      const raw = { positions, indices: new Uint32Array(mesh.triVerts) },
+        q = meshQuality(raw);
+      const pieces = union.decompose(),
+        components = pieces.length;
+      pieces.forEach((p) => p.delete());
+      const slice = own(union.slice(floor)),
+        loops = slice.toPolygons();
+      return {
+        raw,
+        points,
+        cells,
+        ...(cellLoops ? { cellLoops } : {}),
+        ids,
+        spheres,
+        loops,
+        quality: q,
+        components,
+        volume: union.volume(),
+        params: p,
+        closed:
+          !q.boundaryEdges &&
+          !q.nonManifoldEdges &&
+          !q.degenerateFaces &&
+          !q.invalidFaces &&
+          !q.inconsistentEdges,
+      };
+    }
     const circles = spheres
       .filter((s) => s.radius > Math.abs(floor - s.center[2]))
       .map((s) =>
@@ -376,12 +418,11 @@ export function voronoiBuild(m, p) {
         ),
       );
     let footprint = own(
-      own(
-        m.CrossSection.union(
-          surfaces ? surfaces.map((s) => own(s.solid.slice(floor))) : circles,
-        ),
-      ).intersect(rectangle),
+      m.CrossSection.union(
+        surfaces ? surfaces.map((s) => own(s.solid.slice(floor))) : circles,
+      ),
     );
+    if (!p.unclippedBalloons) footprint = own(footprint.intersect(rectangle));
     if (domainLoops)
       footprint = own(
         footprint.simplify(Math.max(1e-5, Math.max(w, h) * 1e-7)),

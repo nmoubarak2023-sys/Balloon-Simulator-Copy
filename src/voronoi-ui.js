@@ -2,7 +2,7 @@ import { populateAllZones } from "./zone-population.js";
 import { placeSavedFloor } from "./floor-placement.js";
 import { demoBoundary, loopBounds } from "./zones.js";
 import { defaultZoneSettings, ZONE_STRIDE } from "./zoned-voronoi.js";
-import { readBoundaryCurves } from "./rhino-zones.js";
+import { readBuildingCurves } from "./rhino-zones.js";
 import { initColumns } from "./column-ui.js";
 import { mountGeometryLibrary, canvasThumbnail } from "./geometry-library.js";
 import { quadObj, quadMesh } from "./quad-mesh.js";
@@ -51,7 +51,10 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     "radiusMax",
     "radiusSeed",
   ];
-  pane.innerHTML = `<div class="voro-layout"><section class="panel"><div class="panel-heading"><span>PERSPECTIVE <small>01 / VORONOI BALLOONS</small></span><button id="vFit">FIT ↗</button></div><div class="canvas-tools"><button id="vRoof" aria-pressed="true">ENCLOSURE</button><button id="vSpheres" aria-pressed="false">BALLOONS</button><button id="vPickZone" aria-pressed="false">PICK ZONE</button><button id="vIsolateCanvas" aria-pressed="false">ISOLATE ZONE</button><button id="vPopulateCanvas">POPULATE SELECTED ZONE ↗</button><button id="vPickAnchor" aria-pressed="false">PICK ANCHOR CENTER</button><button id="vWire" aria-pressed="false">WIRE</button></div><div id="vPerspective" class="voro-canvas"></div><div class="viewer-footer">ROOF / FLAT FLOOR / PERIMETER ONLY</div></section><aside><section class="panel"><div class="panel-heading">PLAN VIEW <small>02 / CELLS & SELECTED SEEDS</small></div><div id="vPlan" class="voro-plan"></div></section><section class="panel"><div class="panel-heading">CONTROL PANEL <small>03 / INDEPENDENT SIMULATION</small></div><div class="voro-controls"><label class="button" for="vBoundaryFile">IMPORT FLOOR CURVES .3DM ↗</label><input id="vBoundaryFile" type="file" accept=".3dm" hidden><button id="vBoundaryDemo">EXAMPLE PERIMETER & ZONES</button><p id="vBoundaryInfo" class="note"></p><label>Population zone<select id="vZone"></select></label><p id="vZoneInfo" class="note"></p><label><input id="vShowAllZones" type="checkbox"> Show all zones</label><p class="note">Preview the selected zone, or show all populated zones. Exports include all populated zones.</p><p class="note">Import one closed perimeter and closed zone outlines or connected divider curves on the same horizontal plane. Rhino model units are converted to feet. Population controls below apply to the selected zone.</p><select id="vSize" hidden><option value="160">160</option><option value="80" selected>80</option><option value="40">40</option></select>${fields.map(([id, label, value, min, max, step]) => `<div class="control"><label for="v_${id}">${label}</label><input id="vn_${id}" type="number" value="${value}" min="${min}" max="${max}" step="${step}" aria-label="${label}"><input id="v_${id}" type="range" value="${value}" min="${min}" max="${max}" step="${step}"></div>`).join("")}<button id="vGenerate" class="primary">POPULATE SELECTED ZONE ↗</button><button id="vPopulateFloor">POPULATE ALL ZONES ON THIS FLOOR ↗</button><button id="vPopulateBuilding">POPULATE ALL LOADED FLOORS ↗</button><p class="note">These actions fill the remaining zones using each zone’s own settings. Existing edits, frozen balloons and popped balloons are preserved. Empty floor slots are skipped.</p><p class="note">Nearest-point selection retains original Voronoi cells. The roof uses the highest edited balloon surface; smoothing changes interior heights only. Disconnected footprints remain separate and are reported.</p><div class="pair"><button id="vObj">EXPORT .OBJ</button><button id="v3dm">EXPORT .3DM</button></div><button id="vSave">SAVE SETTINGS & DATA</button><label class="button" for="vLoad">OPEN VORONOI PROJECT</label><input hidden id="vLoad" type="file" accept=".json"><pre id="vReport" class="iteration-report">Generate an enclosure to check its mesh.</pre></div></section></aside></div><div class="status-bar" id="vStatus" role="status">Ready to generate.</div>`;
+  pane.innerHTML = `<div class="voro-layout"><section class="panel"><div class="panel-heading"><span>PERSPECTIVE <small>01 / VORONOI BALLOONS</small></span><button id="vFit">FIT ↗</button></div><div class="canvas-tools"><button id="vRoof" aria-pressed="true">ENCLOSURE</button><button id="vSpheres" aria-pressed="false">BALLOONS</button><button id="vPickZone" aria-pressed="false">PICK ZONE</button><button id="vIsolateCanvas" aria-pressed="false">ISOLATE ZONE</button><button id="vPopulateCanvas">POPULATE SELECTED ZONE ↗</button><button id="vPickAnchor" aria-pressed="false">PICK ANCHOR CENTER</button><button id="vWire" aria-pressed="false">WIRE</button></div><div id="vPerspective" class="voro-canvas"></div><div class="viewer-footer">FULL BALLOONS / ROUNDED SURFACE UNION</div></section><aside><section class="panel"><div class="panel-heading">PLAN VIEW <small>02 / CELLS & SELECTED SEEDS</small></div><div id="vPlan" class="voro-plan"></div></section><section class="panel"><div class="panel-heading">CONTROL PANEL <small>03 / INDEPENDENT SIMULATION</small></div><div class="voro-controls"><label class="button" for="vBoundaryFile">IMPORT FLOOR CURVES .3DM ↗</label><input id="vBoundaryFile" type="file" accept=".3dm" hidden><button id="vBoundaryDemo">EXAMPLE PERIMETER & ZONES</button><p id="vBoundaryInfo" class="note"></p><label>Population zone<select id="vZone"></select></label><p id="vZoneInfo" class="note"></p><label><input id="vShowAllZones" type="checkbox"> Show all zones</label><p class="note">Preview the selected zone, or show all populated zones. Exports include all populated zones.</p><p class="note">Import one closed perimeter and closed zone outlines or connected divider curves on the same horizontal plane. Rhino model units are converted to feet. Population controls below apply to the selected zone.</p><select id="vSize" hidden><option value="160">160</option><option value="80" selected>80</option><option value="40">40</option></select>${fields.map(([id, label, value, min, max, step]) => `<div class="control"><label for="v_${id}">${label}</label><input id="vn_${id}" type="number" value="${value}" min="${min}" max="${max}" step="${step}" aria-label="${label}"><input id="v_${id}" type="range" value="${value}" min="${min}" max="${max}" step="${step}"></div>`).join("")}<button id="vGenerate" class="primary">POPULATE SELECTED ZONE ↗</button><button id="vPopulateFloor">POPULATE ALL ZONES ON THIS FLOOR ↗</button><button id="vPopulateBuilding">POPULATE ALL LOADED FLOORS ↗</button><p class="note">These actions fill the remaining zones using each zone’s own settings. Existing edits, frozen balloons and popped balloons are preserved. Empty floor slots are skipped.</p><p class="note">All seed points in each populated zone create balloons. Imported curves define the seed regions, without clipping balloons. Smooth enclosure joins the actual rounded balloon surfaces without flattening. Disconnected footprints remain separate and are reported.</p><div class="pair"><button id="vObj">EXPORT .OBJ</button><button id="v3dm">EXPORT .3DM</button></div><button id="vSave">SAVE SETTINGS & DATA</button><label class="button" for="vLoad">OPEN VORONOI PROJECT</label><input hidden id="vLoad" type="file" accept=".json"><details class="mesh-details"><summary>MESH DETAILS</summary><pre id="vReport" class="iteration-report">Generate an enclosure to check its mesh.</pre></details></div></section></aside></div><div class="status-bar" id="vStatus" role="status">Ready to generate.</div>`;
+  for (const id of ["index", "selected", "smoothing"])
+    pane.querySelector("#vn_" + id).closest(".control").hidden = true;
+  pane.querySelector("#vPickAnchor").hidden = true;
   const globalSettingsNote = document.createElement("p");
   globalSettingsNote.className = "note";
   globalSettingsNote.textContent =
@@ -75,9 +78,16 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
   stepbar.innerHTML =
     '<button id="vPrevious">← BACK</button><select id="vStage" aria-label="Construction step">' +
     stages
-      .map(
-        (name, i) =>
-          '<option value="' + i + '">' + (i + 1) + ". " + name + "</option>",
+      .map((name, i) =>
+        [0, 1, 2, 4, 7].includes(i)
+          ? '<option value="' +
+            i +
+            '">' +
+            ([0, 1, 2, 4, 7].indexOf(i) + 1) +
+            ". " +
+            (i === 4 ? "Full balloons" : name) +
+            "</option>"
+          : "",
       )
       .join("") +
     '</select><button id="vNext">NEXT →</button><button id="vPlay">PLAY STEPS</button><p id="vStepDescription" class="note"></p>';
@@ -90,6 +100,11 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     if (!boundary || !zoneConfigs[activeZone]) return;
     for (const id of zoneFields)
       zoneConfigs[activeZone][id] = Number($("vn_" + id).value);
+    const cfg = zoneConfigs[activeZone];
+    if (cfg.radiusMax < cfg.radiusMin) {
+      cfg.radiusMax = cfg.radiusMin;
+      $("vn_radiusMax").value = $("v_radiusMax").value = cfg.radiusMax;
+    }
   }
   function zoneUI(load = true) {
     $("vZone").replaceChildren(
@@ -166,7 +181,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       next = { ...next, elevation: activeFloor * 20 };
     boundary = next;
     populatedZones = [];
-    zoneConfigs = defaultZoneSettings(next);
+    zoneConfigs = defaultZoneSettings(next, activeFloor);
     activeZone = 0;
     zoneUI();
     const elevation = next.elevation ?? 0,
@@ -200,7 +215,8 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       pressureEnabled: false,
     });
     fitNext = true;
-    generate();
+    stage = 0;
+    generate("prepare");
   }
   $("vBoundaryDemo").onclick = () =>
     importBoundary(demoBoundary()).catch(
@@ -217,25 +233,94 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       $("vStatus").textContent =
         "Reading Rhino curves and detecting population zones…";
       const r = await rhino(),
-        input = readBoundaryCurves(r, new Uint8Array(await file.arrayBuffer())),
+        input = readBuildingCurves(r, new Uint8Array(await file.arrayBuffer())),
         partitionWorker = workerFactory();
-      let next;
+      const boundaries = [];
       try {
-        next = await new Promise((resolve, reject) => {
-          partitionWorker.onmessage = ({ data }) =>
-            data.error ? reject(Error(data.error)) : resolve(data.result);
-          partitionWorker.onerror = (e) => reject(Error(e.message));
-          partitionWorker.postMessage({
-            id: 1,
-            action: "partitionZones",
-            curves: input.curves,
-            options: { elevation: input.elevation, sourceName: file.name },
+        for (const [i, floor] of input.floors.entries()) {
+          const next = await new Promise((resolve, reject) => {
+            partitionWorker.onmessage = ({ data }) =>
+              data.error
+                ? reject(Error(`Floor ${i + 1}: ${data.error}`))
+                : resolve(data.result);
+            partitionWorker.onerror = (e) => reject(Error(e.message));
+            partitionWorker.postMessage({
+              id: 1,
+              action: "partitionZones",
+              curves: floor.curves,
+              options: {
+                elevation: floor.elevation,
+                sourceName: `${file.name} · Floor ${i + 1}`,
+              },
+            });
           });
-        });
+          boundaries.push(next);
+        }
       } finally {
         partitionWorker.terminate();
       }
-      await importBoundary(next);
+      if (boundaries.length === 1) await importBoundary(boundaries[0]);
+      else {
+        // Validate every level before replacing any existing floor state.
+        while (floorState.length < boundaries.length)
+          floorState.push({
+            name: `Floor ${floorState.length + 1}`,
+            visible: true,
+            snapshot: null,
+          });
+        floorState.forEach((f, i) => {
+          f.snapshot = null;
+          f.visible = true;
+          const b = boundaries[i];
+          if (!b) return;
+          const configs = defaultZoneSettings(b, i),
+            z = b.elevation ?? 0,
+            span = Math.max(b.bounds.width, b.bounds.height);
+          const params = {
+            unclippedBalloons: true,
+            clipFloor: true,
+            boundary: b,
+            zoneSettings: configs,
+            populatedZones: [],
+            width: b.bounds.width,
+            height: b.bounds.height,
+            origin: [...b.bounds.min],
+            count: configs.reduce((n, c) => n + c.count, 0),
+            index: 0,
+            floor: z,
+            spacing: Math.max(0.5, Math.round((span / 40) * 2) / 2),
+            smoothing: 4,
+          };
+          f.snapshot = {
+            params,
+            result: null,
+            editing: {
+              curves: [
+                [
+                  [b.bounds.min[0], b.bounds.min[1], z],
+                  [b.bounds.max[0], b.bounds.max[1], z],
+                ],
+              ],
+              edits: {},
+              pressureEnabled: false,
+            },
+            view: { activeZone: 0, showAllZones: true },
+            stage: 0,
+            wire: false,
+          };
+        });
+        activeFloor = 0;
+        isolateZone = false;
+        $("vIsolateZone").checked = false;
+        floorUI();
+        restoreFloor(floorState[0].snapshot, false);
+        generate("prepare");
+        stage = 0;
+        draw();
+        fit();
+      }
+      $("vProjectMessage").textContent =
+        `Imported ${boundaries.length} floor(s), ordered bottom to top: ${boundaries.map((b, i) => `Floor ${i + 1}: Z=${b.elevation.toFixed(3)} ft, ${b.zones.length} zones`).join("; ")}. Only the active floor generates its simulation. Other floors retain their own state.`;
     } catch (e) {
       $("vStatus").textContent = e.message;
     } finally {
@@ -252,7 +337,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     pickZone = false;
   let zonePickTargets = [];
   const floorControls = document.createElement("div");
-  floorControls.innerHTML = `<label>Active floor<select id="vFloor">${floorState.map((f, i) => `<option value="${i}">${f.name}</option>`).join("")}</select></label><div id="vFloorVisibility"></div><label><input type="checkbox" id="vIsolateZone"> Isolate active zone</label><p class="note">Import an outline into each floor separately. Rhino elevations are retained; outlines at Z=0 are stacked at 20 ft intervals. Each floor keeps its own zones, balloons and edits.</p>`;
+  floorControls.innerHTML = `<label>Editing floor<select id="vFloor" title="Only this floor is editable. Other visible floors are faded and locked.">${floorState.map((f, i) => `<option value="${i}">${f.name}</option>`).join("")}</select></label><div id="vFloorVisibility"></div><label><input type="checkbox" id="vIsolateZone"> Isolate active zone</label>`;
   floorControls.className = "floor-toolbar";
   floorControls.setAttribute("aria-label", "Building floors");
   floorControls.insertAdjacentHTML(
@@ -261,22 +346,33 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
   );
   floorControls.insertAdjacentHTML(
     "beforeend",
-    '<label class="button" for="vLoad">OPEN BUILDING PROJECT .JSON ↗</label><p id="vProjectMessage" role="status" class="note"></p>',
+    '<span id="vProjectMessage" role="status" hidden></span>',
   );
+  floorControls
+    .querySelector("strong")
+    .after(pane.querySelector('label[for="vBoundaryFile"]'));
   pane.querySelector(".voro-layout").before(floorControls);
-  floorState.forEach((f, i) => {
-    const label = document.createElement("label"),
-      check = document.createElement("input");
-    check.type = "checkbox";
-    check.checked = true;
-    check.setAttribute("aria-label", `Show Floor ${i + 1}`);
-    check.onchange = () => {
-      f.visible = check.checked;
-      draw();
-    };
-    label.append(check, document.createTextNode(` Floor ${i + 1}`));
-    $("vFloorVisibility").append(label);
-  });
+  function floorUI() {
+    $("vFloor").replaceChildren(
+      ...floorState.map((f, i) => new Option(f.name, i)),
+    );
+    $("vFloor").value = activeFloor;
+    $("vFloorVisibility").replaceChildren();
+    floorState.forEach((f, i) => {
+      const label = document.createElement("label"),
+        check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = f.visible;
+      check.setAttribute("aria-label", `Show Floor ${i + 1}`);
+      check.onchange = () => {
+        f.visible = check.checked;
+        draw();
+      };
+      label.append(check, document.createTextNode(` Floor ${i + 1}`));
+      $("vFloorVisibility").append(label);
+    });
+  }
+  floorUI();
   function stashFloor() {
     floorState[activeFloor].snapshot = {
       params: parameters(),
@@ -287,7 +383,8 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       wire,
     };
   }
-  function restoreFloor(snapshot) {
+  function restoreFloor(snapshot, autoBuild = true, keepStage = false) {
+    const previousStage = stage;
     const params = snapshot.params;
     restoreBoundary(params);
     restoreZoneView(snapshot.view);
@@ -297,10 +394,15 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     zoneUI(!!boundary);
     editing?.load(snapshot.editing);
     result = snapshot.result ? structuredClone(snapshot.result) : null;
-    stage = snapshot.stage ?? 0;
+    stage = keepStage
+      ? previousStage
+      : [3, 5, 6].includes(snapshot.stage)
+        ? 4
+        : (snapshot.stage ?? 0);
     wire = !!snapshot.wire;
     fitNext = true;
     draw();
+    if (autoBuild && !result && !pending) generate("prepare");
   }
   $("vFloor").onchange = () => {
     if (pending) {
@@ -312,10 +414,10 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     stashFloor();
     activeFloor = Number($("vFloor").value);
     if (floorState[activeFloor].snapshot)
-      restoreFloor(floorState[activeFloor].snapshot);
+      restoreFloor(floorState[activeFloor].snapshot, true, true);
     else {
       boundary = demoBoundary();
-      zoneConfigs = defaultZoneSettings(boundary);
+      zoneConfigs = defaultZoneSettings(boundary, activeFloor);
       populatedZones = [];
       activeZone = 0;
       result = null;
@@ -339,6 +441,10 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
   };
   $("vIsolateZone").onchange = () => {
     isolateZone = $("vIsolateZone").checked;
+    if (!isolateZone) {
+      showAllZones = true;
+      zoneUI(false);
+    }
     draw();
     fit();
   };
@@ -347,9 +453,23 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     return { activeFloor, isolateZone, floors: structuredClone(floorState) };
   }
   function loadBuilding(building) {
-    if (!building?.floors || building.floors.length !== 5) return;
+    if (
+      !building?.floors ||
+      !building.floors.length ||
+      building.floors.length > 20
+    )
+      return;
+    floorState.splice(
+      0,
+      floorState.length,
+      ...structuredClone(building.floors),
+    );
+    floorUI();
     building.floors.forEach((f, i) => Object.assign(floorState[i], f));
-    activeFloor = Math.max(0, Math.min(4, building.activeFloor ?? 0));
+    activeFloor = Math.max(
+      0,
+      Math.min(floorState.length - 1, building.activeFloor ?? 0),
+    );
     isolateZone = !!building.isolateZone;
     $("vFloor").value = activeFloor;
     $("vIsolateZone").checked = isolateZone;
@@ -534,10 +654,10 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
                 roughness: 0.3,
                 metalness: 0.2,
                 transparent: true,
-                opacity: 0.7,
+                opacity: 1,
                 side: T.DoubleSide,
                 clippingPlanes:
-                  stage === 5
+                  !r.params.unclippedBalloons && stage === 5
                     ? [new T.Plane(new T.Vector3(0, 0, 1), -r.params.floor)]
                     : [],
               }),
@@ -553,9 +673,27 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
             mesh.userData.otherFloor = true;
             group.add(mesh);
           }
-        } else if (r?.raw.indices.length) {
+        } else if (r?.raw.indices.length && stage >= 6) {
+          let raw = r.raw;
+          if (stage === 6)
+            raw = {
+              positions: raw.positions,
+              indices: Uint32Array.from(
+                Array.from({ length: raw.indices.length / 3 }, (_, i) =>
+                  Array.from(raw.indices.slice(i * 3, i * 3 + 3)),
+                )
+                  .filter((t) =>
+                    t.every(
+                      (j) =>
+                        Math.abs(raw.positions[j * 3 + 2] - r.params.floor) <
+                        1e-6,
+                    ),
+                  )
+                  .flat(),
+              ),
+            };
           const mesh = new T.Mesh(
-            geometry(r.raw),
+            geometry(raw),
             new T.MeshPhysicalMaterial({
               color: 0x4e9fa9,
               roughness: 0.3,
@@ -565,6 +703,42 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
           );
           mesh.userData.otherFloor = true;
           group.add(mesh);
+        }
+        if (r && stage >= 1 && stage <= 3) {
+          const chosen = new Set(stage >= 3 ? r.ids : []),
+            z = r.params.floor + 0.06;
+          r.points.forEach((p, id) => {
+            if (!p) return;
+            const dot = new T.Mesh(
+              new T.CircleGeometry(r.params.width * 0.006, 12),
+              new T.MeshBasicMaterial({
+                color: chosen.has(id) ? 0xdc24f4 : 0x21e0ed,
+                side: T.DoubleSide,
+              }),
+            );
+            dot.position.set(...p, z);
+            dot.userData.otherFloor = true;
+            group.add(dot);
+            if (stage >= 2)
+              for (const loop of r.cellLoops?.[id]?.length
+                ? r.cellLoops[id]
+                : r.cells[id]?.length
+                  ? [r.cells[id]]
+                  : []) {
+                const line = new T.LineLoop(
+                  new T.BufferGeometry().setFromPoints(
+                    loop.map((p) => new T.Vector3(...p, z)),
+                  ),
+                  new T.LineBasicMaterial({
+                    color: chosen.has(id) ? 0xdc24f4 : 0x21e0ed,
+                    transparent: true,
+                    opacity: chosen.has(id) ? 1 : 0.45,
+                  }),
+                );
+                line.userData.otherFloor = true;
+                group.add(line);
+              }
+          });
         }
         if (b)
           for (const z of b.zones)
@@ -579,6 +753,21 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
               group.add(line);
             }
       });
+    // Context floors never enter the balloon editor's pick list. Draw them faintly
+    // without writing depth, so they cannot conceal the active editing floor.
+    for (const child of group.children)
+      if (child.userData.otherFloor)
+        child.traverse((o) => {
+          if (!o.material) return;
+          for (const material of Array.isArray(o.material)
+            ? o.material
+            : [o.material]) {
+            material.transparent = true;
+            material.opacity = o.isMesh ? 0.18 : 0.25;
+            material.depthWrite = false;
+          }
+          o.renderOrder = -1;
+        });
     if (!result) return;
     $("vPickAnchor").setAttribute("aria-pressed", stage >= 1 && stage <= 3);
     $("vRoof").setAttribute("aria-pressed", stage === 7);
@@ -644,16 +833,18 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
             roughness: 0.3,
             metalness: 0.2,
             transparent: true,
-            opacity: 0.7,
+            opacity: 1,
             side: T.DoubleSide,
             wireframe: false,
-            clippingPlanes: result.params.boundary
-              ? stage === 4
-                ? []
-                : [planes[4]]
-              : stage === 4
-                ? planes.slice(0, 4)
-                : planes,
+            clippingPlanes: result.params.unclippedBalloons
+              ? []
+              : result.params.boundary
+                ? stage === 4
+                  ? []
+                  : [planes[4]]
+                : stage === 4
+                  ? planes.slice(0, 4)
+                  : planes,
           }),
         );
         if (!s.raw) {
@@ -661,8 +852,11 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
           mesh.scale.fromArray(s.axisScale || [1, 1, 1]);
         }
         const lines = quadWire(s.raw || rawGeometry(mesh.geometry));
-        lines.material.clippingPlanes =
-          stage === 4 ? planes.slice(0, 4) : planes;
+        lines.material.clippingPlanes = result.params.unclippedBalloons
+          ? []
+          : stage === 4
+            ? planes.slice(0, 4)
+            : planes;
         lines.visible = wire;
         mesh.add(lines);
         mesh.userData.balloonId = s.id;
@@ -675,10 +869,10 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       "Deterministic candidate centers inside the rectangle.",
       "Original Voronoi territories for every seed.",
       "Click a Voronoi center to set the anchor index and rebuild its nearest cluster. Drag empty space to orbit.",
-      "Balloons are clipped to their own population zones.",
+      "Full balloons grow from seeds inside the imported curves; zone and perimeter edges do not cut them. The underside is clipped at the floor plate.",
       "Sphere preview split at the horizontal floor plane.",
       "Union of original sphere sections, filled as one floor footprint.",
-      "Upper envelope of edited balloons, relaxed interior heights, flat bottom and perimeter closure.",
+      "Union of the actual rounded balloon meshes. The rounded surfaces are retained, with a flat cut only at the floor plate.",
     ];
     $("vStage").value = stage;
     $("vStepDescription").textContent = descriptions[stage];
@@ -769,7 +963,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     for (const loop of stage >= 6 ? preview.loops : []) {
       const outline = new T.LineLoop(
         new T.BufferGeometry().setFromPoints(
-          loop.map((p) => new T.Vector3(...p, 0.2)),
+          loop.map((p) => new T.Vector3(...p, result.params.floor + 0.2)),
         ),
         new T.LineBasicMaterial({ color: 0xffffff }),
       );
@@ -824,6 +1018,8 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     if (boundary) {
       storeZone();
       return {
+        unclippedBalloons: true,
+        clipFloor: true,
         boundary: structuredClone(boundary),
         zoneSettings: structuredClone(zoneConfigs),
         populatedZones: [...populatedZones],
@@ -840,6 +1036,8 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     }
     const width = Number($("vSize").value);
     return {
+      unclippedBalloons: true,
+      clipFloor: true,
       width,
       height: width * 0.625,
       ...Object.fromEntries(
@@ -850,7 +1048,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
   }
   function generate(populate = false) {
     if (pending) return;
-    if (populate === "floor" && boundary)
+    if ((populate === "floor" || populate === "prepare") && boundary)
       populatedZones = populateAllZones(parameters()).populatedZones;
     if (populate === true && boundary && !populatedZones.includes(activeZone))
       populatedZones.push(activeZone);
@@ -864,6 +1062,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       pending = false;
       $("vGenerate").disabled = $("vPopulateCanvas").disabled = false;
       if (data.error) {
+        editing?.rejectBuild();
         editing?.setBusy(false);
         $("vStatus").textContent = data.error;
         return;
@@ -966,7 +1165,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
           activeFloor = hit.floor;
           $("vFloor").value = activeFloor;
           const snapshot = floorState[activeFloor].snapshot;
-          if (snapshot) restoreFloor(snapshot);
+          if (snapshot) restoreFloor(snapshot, true, true);
         }
         storeZone();
         activeZone = hit.zone;
@@ -1052,7 +1251,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       $("v_index").value = $("vn_index").value = boundary
         ? down.index % ZONE_STRIDE
         : down.index;
-      stage = 3;
+      stage = 2;
       draw();
       generate();
     },
@@ -1071,7 +1270,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       timer = null;
       $("vPlay").textContent = "PLAY STEPS";
     }
-    stage = 3;
+    stage = 2;
     draw();
     $("vStatus").textContent =
       "Click a Voronoi center in the perspective view to set its anchor index. The white center is the current anchor.";
@@ -1087,6 +1286,16 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     };
     for (const input of [range, number])
       input.onchange = () => {
+        if (id === "radiusMin" || id === "radiusMax") {
+          const min = Number($("vn_radiusMin").value),
+            max = Number($("vn_radiusMax").value);
+          if (min > max) {
+            const other = id === "radiusMin" ? "radiusMax" : "radiusMin";
+            $("vn_" + other).value = $("v_" + other).value = Number(
+              number.value,
+            );
+          }
+        }
         if (id === "count") {
           const n = Number(number.value);
           for (const name of ["index", "selected"])
@@ -1183,11 +1392,11 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     draw();
   };
   $("vPrevious").onclick = () => {
-    stage = Math.max(0, stage - 1);
+    stage = [0, 1, 2, 4, 7][Math.max(0, [0, 1, 2, 4, 7].indexOf(stage) - 1)];
     draw();
   };
   $("vNext").onclick = () => {
-    stage = Math.min(7, stage + 1);
+    stage = [0, 1, 2, 4, 7][Math.min(4, [0, 1, 2, 4, 7].indexOf(stage) + 1)];
     draw();
   };
   $("vPlay").onclick = () => {
@@ -1208,7 +1417,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
         $("vPlay").textContent = "PLAY STEPS";
         return;
       }
-      stage++;
+      stage = [0, 1, 2, 4, 7][Math.min(4, [0, 1, 2, 4, 7].indexOf(stage) + 1)];
       draw();
     }, 1800);
   };
@@ -1323,6 +1532,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     } else generate();
   });
   mountGeometryLibrary({
+    initiallyOpen: false,
     workspace: "voronoi",
     container: pane.querySelector(".voro-controls"),
     save: () => {
@@ -1415,7 +1625,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     getResult: () => result,
     rebuild: generate,
     showBalloons: () => {
-      stage = 5;
+      stage = 4;
       draw();
     },
     rhino,
@@ -1427,12 +1637,10 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     renderers[0].render(scene, camera);
     editing?.renderPerspective(renderers[0]);
     editing?.beforePlan();
-    if (stage >= 4) {
-      renderers[1].localClippingEnabled = true;
-      renderers[1].render(scene, plan);
-      renderers[1].autoClear = false;
-      renderers[1].clearDepth();
-    }
+    renderers[1].localClippingEnabled = true;
+    renderers[1].render(scene, plan);
+    renderers[1].autoClear = false;
+    renderers[1].clearDepth();
     renderers[1].render(diagram, plan);
     renderers[1].autoClear = true;
     editing?.renderPlan(renderers[1], plan);

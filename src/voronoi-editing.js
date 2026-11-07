@@ -58,8 +58,15 @@ export function createVoronoiEditing({
     popped = [],
     popEvents = [],
     popPressure = 0.25,
-    operationHistory = [];
+    operationHistory = [],
+    pendingOperation = null;
   const recordOperation = () => {
+    pendingOperation = structuredClone({
+      frozen,
+      popped,
+      popEvents,
+      popPressure,
+    });
     operationHistory.push(
       structuredClone({ frozen, popped, popEvents, popPressure }),
     );
@@ -124,7 +131,7 @@ export function createVoronoiEditing({
     return {
       edits: structuredClone(edits),
       frozen: structuredClone(frozen),
-      popped: [...popped],
+      popped: [...new Set(popped)],
       popEvents: structuredClone(popEvents),
       popPressure,
       curves: curves.map(sample),
@@ -635,6 +642,10 @@ export function createVoronoiEditing({
     const balloon = result()?.spheres.find((s) => s.id === selectedId);
     if (busy || !balloon || result().spheres.length <= 1) return;
     recordOperation();
+    if (popped.includes(selectedId)) {
+      rebuild();
+      return;
+    }
     popped.push(selectedId);
     delete frozen[selectedId];
     popEvents.push({
@@ -702,6 +713,7 @@ export function createVoronoiEditing({
     }
   };
   function update(nextMeshes, locked = false) {
+    if (!locked) pendingOperation = null;
     meshes = nextMeshes;
     busy = locked;
     transform.enabled = !locked;
@@ -728,6 +740,8 @@ export function createVoronoiEditing({
       paint();
       return;
     }
+    if (Array.isArray(data.popped))
+      data = { ...data, popped: [...new Set(data.popped)] };
     validateVoronoiLifecycle(data);
     const nextCurves = validateCurves(data.curves);
     const nextEdits = data.edits || {};
@@ -736,7 +750,7 @@ export function createVoronoiEditing({
     curves = nextCurves;
     edits = structuredClone(nextEdits);
     frozen = structuredClone(data.frozen ?? {});
-    popped = [...(data.popped ?? [])];
+    popped = [...new Set(data.popped ?? [])];
     popEvents = structuredClone(data.popEvents ?? []);
     popPressure = data.popPressure ?? 0.25;
     operationHistory = [];
@@ -766,6 +780,15 @@ export function createVoronoiEditing({
   paint();
   return {
     settings,
+    rejectBuild() {
+      if (pendingOperation) {
+        ({ frozen, popped, popEvents, popPressure } = pendingOperation);
+        pendingOperation = null;
+        operationHistory.pop();
+        ui();
+        paint();
+      }
+    },
     setVisibleZone(zone) {
       visibleZone = zone;
     },
@@ -783,7 +806,7 @@ export function createVoronoiEditing({
       tool,
       curves: structuredClone(curves),
       frozen: structuredClone(frozen),
-      popped: [...popped],
+      popped: [...new Set(popped)],
       popEvents: structuredClone(popEvents),
       popPressure,
       edits: structuredClone(edits),

@@ -2,19 +2,19 @@ import { voronoiBuild } from "./voronoi-engine.js";
 import { loopBounds } from "./zones.js";
 import { meshQuality, signedVolume, prepareMesh } from "./mesh-quality.js";
 export const ZONE_STRIDE = 150;
-export function defaultZoneSettings(boundary) {
+export function defaultZoneSettings(boundary, floorIndex = 0) {
   const area = boundary.zones.reduce((s, z) => s + z.area, 0);
   return boundary.zones.map((z, i) => {
     const count = Math.max(4, Math.round((40 * z.area) / area)),
       r = Math.sqrt(z.area / (count * Math.PI));
     return {
       count,
-      seed: 42 + i,
+      seed: 42 + i + floorIndex * 101,
       index: 0,
       selected: count,
       radiusMin: Math.max(1, Math.round(r * 1.4 * 2) / 2),
       radiusMax: Math.max(1.5, Math.round(r * 2.2 * 2) / 2),
-      radiusSeed: 17 + i,
+      radiusSeed: 17 + i + floorIndex * 101,
     };
   });
 }
@@ -38,7 +38,11 @@ export function zonedVoronoiBuild(m, p) {
   )
     throw Error("Invalid populated zones.");
   if (
-    configs.reduce((s, c, i) => s + (enabled.has(i) ? c.selected : 0), 0) > 200
+    configs.reduce(
+      (s, c, i) =>
+        s + (enabled.has(i) ? (p.unclippedBalloons ? c.count : c.selected) : 0),
+      0,
+    ) > 200
   )
     throw Error("Use at most 200 selected balloons across all zones.");
   const results = [];
@@ -59,6 +63,9 @@ export function zonedVoronoiBuild(m, p) {
       results.push(
         voronoiBuild(m, {
           ...cfg,
+          selected: p.unclippedBalloons ? cfg.count : cfg.selected,
+          unclippedBalloons: !!p.unclippedBalloons,
+          clipFloor: !!p.clipFloor,
           width: bounds.width,
           height: bounds.height,
           floor: p.floor,

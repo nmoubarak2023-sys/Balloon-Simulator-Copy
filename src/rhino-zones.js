@@ -1,4 +1,4 @@
-export function readBoundaryCurves(r, bytes) {
+export function readBuildingCurves(r, bytes) {
   const doc = r.File3dm.fromByteArray(bytes);
   if (!doc) throw Error("Could not read the Rhino .3dm file.");
   try {
@@ -125,66 +125,95 @@ export function readBoundaryCurves(r, bytes) {
       throw Error(
         "No curve objects found. Export the perimeter and divider curves as a .3dm file.",
       );
-    const elevation = all[0][2],
-      span = Math.max(
-        1,
-        ...all.map(
-          (p) => Math.abs(p[0] - all[0][0]) + Math.abs(p[1] - all[0][1]),
-        ),
-      );
-    if (
-      all.some((p) => Math.abs(p[2] - elevation) > Math.max(0.001, span * 1e-6))
-    )
+    const span = Math.max(
+      1,
+      ...all.map(
+        (p) => Math.abs(p[0] - all[0][0]) + Math.abs(p[1] - all[0][1]),
+      ),
+    );
+    const tolerance = Math.max(0.001, span * 1e-6),
+      floors = [];
+    for (const curve of curves) {
+      if (!curve.points.length) continue;
+      const z =
+        curve.points.reduce((n, p) => n + p[2], 0) / curve.points.length;
+      if (curve.points.some((p) => Math.abs(p[2] - z) > tolerance))
+        throw Error(
+          "Each floor curve must be horizontal. A curve spans multiple elevations; align it with SetPt Z in Rhino.",
+        );
+      let floor = floors.find((f) => Math.abs(f.elevation - z) <= tolerance);
+      if (!floor) {
+        floor = { elevation: z, curves: [] };
+        floors.push(floor);
+      }
+      floor.curves.push(curve);
+    }
+    floors.sort((a, b) => a.elevation - b.elevation);
+    if (floors.length > 20)
       throw Error(
-        "Floor curves must lie on one horizontal plane. Use SetPt Z in Rhino to align them.",
+        "Use at most 20 distinct floor elevations in one building file.",
       );
-    // Connect true Rhino endpoints to the sampled curve within the chord error.
-    // This avoids gaps when a divider meets a NURBS edge between sample points.
-    if (curveTolerance > 0)
-      for (const curve of curves)
-        if (!curve.closed)
-          for (const index of [0, curve.points.length - 1]) {
-            const p = curve.points[index];
-            let best = null,
-              distance = curveTolerance * 1.2;
-            for (const other of curves)
-              if (other !== curve)
-                for (
-                  let j = 0;
-                  j < other.points.length - (other.closed ? 0 : 1);
-                  j++
-                ) {
-                  const a = other.points[j],
-                    b = other.points[(j + 1) % other.points.length],
-                    dx = b[0] - a[0],
-                    dy = b[1] - a[1],
-                    den = dx * dx + dy * dy;
-                  if (!den) continue;
-                  const t = Math.max(
-                      0,
-                      Math.min(
-                        1,
-                        ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / den,
-                      ),
-                    ),
-                    q = [a[0] + t * dx, a[1] + t * dy, elevation],
-                    d = Math.hypot(p[0] - q[0], p[1] - q[1]);
-                  if (d < distance) {
-                    distance = d;
-                    best = q;
-                  }
-                }
-            if (best) curve.points[index] = best;
-          }
     return {
-      curves: curves.map((c) => ({
-        ...c,
-        points: c.points.map((p) => p.slice(0, 2)),
-      })),
-      elevation,
       unitName,
+      floors: floors.map(({ curves, elevation }) => {
+        // Connect true Rhino endpoints to the sampled curve within the chord error.
+        // This avoids gaps when a divider meets a NURBS edge between sample points.
+        if (curveTolerance > 0)
+          for (const curve of curves)
+            if (!curve.closed)
+              for (const index of [0, curve.points.length - 1]) {
+                const p = curve.points[index];
+                let best = null,
+                  distance = curveTolerance * 1.2;
+                for (const other of curves)
+                  if (other !== curve)
+                    for (
+                      let j = 0;
+                      j < other.points.length - (other.closed ? 0 : 1);
+                      j++
+                    ) {
+                      const a = other.points[j],
+                        b = other.points[(j + 1) % other.points.length],
+                        dx = b[0] - a[0],
+                        dy = b[1] - a[1],
+                        den = dx * dx + dy * dy;
+                      if (!den) continue;
+                      const t = Math.max(
+                          0,
+                          Math.min(
+                            1,
+                            ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / den,
+                          ),
+                        ),
+                        q = [a[0] + t * dx, a[1] + t * dy, elevation],
+                        d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+                      if (d < distance) {
+                        distance = d;
+                        best = q;
+                      }
+                    }
+                if (best) curve.points[index] = best;
+              }
+        return {
+          curves: curves.map((c) => ({
+            ...c,
+            points: c.points.map((p) => p.slice(0, 2)),
+          })),
+          elevation,
+          unitName,
+        };
+      }),
     };
   } finally {
     doc.delete();
   }
+}
+
+export function readBoundaryCurves(r, bytes) {
+  const building = readBuildingCurves(r, bytes);
+  if (building.floors.length !== 1)
+    throw Error(
+      "Floor curves must lie on one horizontal plane for a single-floor import.",
+    );
+  return building.floors[0];
 }
