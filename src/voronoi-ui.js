@@ -1,6 +1,10 @@
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { UndoJournal, isUndoShortcut } from "./history.js";
 import { populateAllZones } from "./zone-population.js";
 import { placeSavedFloor } from "./floor-placement.js";
-import { demoBoundary, loopBounds } from "./zones.js";
+import { loopBounds } from "./zones.js";
 import { defaultZoneSettings, ZONE_STRIDE } from "./zoned-voronoi.js";
 import { readBuildingCurves } from "./rhino-zones.js";
 import { initColumns } from "./column-ui.js";
@@ -10,6 +14,7 @@ import { addTechnicalFrames } from "./frames.js";
 import { createVoronoiEditing } from "./voronoi-editing.js";
 import * as T from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { toCreasedNormals } from "three/addons/utils/BufferGeometryUtils.js";
 import { geometry, rawGeometry, quadWire } from "./view.js";
 import { addRhinoQuadMesh } from "./rhino-io.js";
@@ -37,8 +42,9 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     ["spacing", "Mesh spacing (ft)", 2, 0.5, 10, 0.5],
     ["smoothing", "Valley smoothing passes", 4, 0, 20, 1],
   ];
-  let boundary = demoBoundary(),
-    zoneConfigs = defaultZoneSettings(boundary),
+  let boundary = null,
+    zoneConfigs = [],
+    legacyRectangle = false,
     activeZone = 0,
     populatedZones = [],
     showAllZones = true;
@@ -51,18 +57,10 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     "radiusMax",
     "radiusSeed",
   ];
-  pane.innerHTML = `<div class="voro-layout"><section class="panel"><div class="panel-heading"><span>PERSPECTIVE <small>01 / VORONOI BALLOONS</small></span><button id="vFit">FIT ↗</button></div><div class="canvas-tools"><button id="vRoof" aria-pressed="true">ENCLOSURE</button><button id="vSpheres" aria-pressed="false">BALLOONS</button><button id="vPickZone" aria-pressed="false">PICK ZONE</button><button id="vIsolateCanvas" aria-pressed="false">ISOLATE ZONE</button><button id="vPopulateCanvas">POPULATE SELECTED ZONE ↗</button><button id="vPickAnchor" aria-pressed="false">PICK ANCHOR CENTER</button><button id="vWire" aria-pressed="false">WIRE</button></div><div id="vPerspective" class="voro-canvas"></div><div class="viewer-footer">FULL BALLOONS / ROUNDED SURFACE UNION</div></section><aside><section class="panel"><div class="panel-heading">PLAN VIEW <small>02 / CELLS & SELECTED SEEDS</small></div><div id="vPlan" class="voro-plan"></div></section><section class="panel"><div class="panel-heading">CONTROL PANEL <small>03 / INDEPENDENT SIMULATION</small></div><div class="voro-controls"><label class="button" for="vBoundaryFile">IMPORT FLOOR CURVES .3DM ↗</label><input id="vBoundaryFile" type="file" accept=".3dm" hidden><button id="vBoundaryDemo">EXAMPLE PERIMETER & ZONES</button><p id="vBoundaryInfo" class="note"></p><label>Population zone<select id="vZone"></select></label><p id="vZoneInfo" class="note"></p><label><input id="vShowAllZones" type="checkbox"> Show all zones</label><p class="note">Preview the selected zone, or show all populated zones. Exports include all populated zones.</p><p class="note">Import one closed perimeter and closed zone outlines or connected divider curves on the same horizontal plane. Rhino model units are converted to feet. Population controls below apply to the selected zone.</p><select id="vSize" hidden><option value="160">160</option><option value="80" selected>80</option><option value="40">40</option></select>${fields.map(([id, label, value, min, max, step]) => `<div class="control"><label for="v_${id}">${label}</label><input id="vn_${id}" type="number" value="${value}" min="${min}" max="${max}" step="${step}" aria-label="${label}"><input id="v_${id}" type="range" value="${value}" min="${min}" max="${max}" step="${step}"></div>`).join("")}<button id="vGenerate" class="primary">POPULATE SELECTED ZONE ↗</button><button id="vPopulateFloor">POPULATE ALL ZONES ON THIS FLOOR ↗</button><button id="vPopulateBuilding">POPULATE ALL LOADED FLOORS ↗</button><p class="note">These actions fill the remaining zones using each zone’s own settings. Existing edits, frozen balloons and popped balloons are preserved. Empty floor slots are skipped.</p><p class="note">All seed points in each populated zone create balloons. Imported curves define the seed regions, without clipping balloons. Smooth enclosure joins the actual rounded balloon surfaces without flattening. Disconnected footprints remain separate and are reported.</p><div class="pair"><button id="vObj">EXPORT .OBJ</button><button id="v3dm">EXPORT .3DM</button></div><button id="vSave">SAVE SETTINGS & DATA</button><label class="button" for="vLoad">OPEN VORONOI PROJECT</label><input hidden id="vLoad" type="file" accept=".json"><details class="mesh-details"><summary>MESH DETAILS</summary><pre id="vReport" class="iteration-report">Generate an enclosure to check its mesh.</pre></details></div></section></aside></div><div class="status-bar" id="vStatus" role="status">Ready to generate.</div>`;
+  pane.innerHTML = `<div class="voro-layout"><section class="panel"><div class="panel-heading"><span>PERSPECTIVE <small>01 / VORONOI BALLOONS</small></span><button id="vFit">FIT ↗</button></div><div class="canvas-tools"><button id="vRoof" aria-pressed="true">ENCLOSURE</button><button id="vSpheres" aria-pressed="false">BALLOONS</button><button id="vPickZone" aria-pressed="false">PICK ZONE</button><button id="vIsolateCanvas" aria-pressed="false">ISOLATE ZONE</button><button id="vPopulateCanvas">POPULATE SELECTED ZONE ↗</button><button id="vPickAnchor" aria-pressed="false">PICK ANCHOR CENTER</button><button id="vSection" aria-pressed="false">CLIPPING PLANE</button><button id="vSectionMove" aria-pressed="false" hidden>ROTATE PLANE</button><button id="vUndo" disabled>UNDO / CTRL+Z</button><button id="vGhost" aria-pressed="false">GHOSTED</button><button id="vWire" aria-pressed="false">WIRE</button></div><div id="vPerspective" class="voro-canvas"><button id="vUploadPrompt" type="button">UPLOAD FLOOR CURVES</button></div><div class="viewer-footer">FULL BALLOONS / ROUNDED SURFACE UNION</div></section><aside><section class="panel"><div class="panel-heading">PLAN VIEW <small>02 / CELLS & SELECTED SEEDS</small></div><div id="vPlan" class="voro-plan"></div></section><section class="panel"><div class="panel-heading">CONTROL PANEL <small>03 / INDEPENDENT SIMULATION</small></div><div class="voro-controls"><label class="button" for="vBoundaryFile">IMPORT FLOOR CURVES .3DM ↗</label><input id="vBoundaryFile" type="file" accept=".3dm" hidden><p id="vBoundaryInfo" class="note"></p><label>Population zone<select id="vZone"></select></label><p id="vZoneInfo" class="note"></p><label><input id="vShowAllZones" type="checkbox"> Show all zones</label><select id="vSize" hidden><option value="160">160</option><option value="80" selected>80</option><option value="40">40</option></select>${fields.map(([id, label, value, min, max, step]) => `<div class="control"><label for="v_${id}">${label}</label><input id="vn_${id}" type="number" value="${value}" min="${min}" max="${max}" step="${step}" aria-label="${label}"><input id="v_${id}" type="range" value="${value}" min="${min}" max="${max}" step="${step}"></div>`).join("")}<button id="vGenerate" class="primary">POPULATE SELECTED ZONE ↗</button><button id="vPopulateFloor">POPULATE ALL ZONES ON THIS FLOOR ↗</button><button id="vPopulateBuilding">POPULATE ALL LOADED FLOORS ↗</button><div class="pair"><button id="vObj">EXPORT .OBJ</button><button id="v3dm">EXPORT .3DM</button></div><button id="vSave">SAVE SETTINGS & DATA</button><label class="button" for="vLoad">OPEN VORONOI PROJECT</label><input hidden id="vLoad" type="file" accept=".json"><details class="mesh-details"><summary>MESH DETAILS</summary><pre id="vReport" class="iteration-report">Generate an enclosure to check its mesh.</pre></details></div></section></aside></div><div class="status-bar" id="vStatus" role="status">Ready to generate.</div>`;
   for (const id of ["index", "selected", "smoothing"])
     pane.querySelector("#vn_" + id).closest(".control").hidden = true;
   pane.querySelector("#vPickAnchor").hidden = true;
-  const globalSettingsNote = document.createElement("p");
-  globalSettingsNote.className = "note";
-  globalSettingsNote.textContent =
-    "Floor plane, mesh spacing and valley smoothing apply to all zones.";
-  pane
-    .querySelector("#vn_floor")
-    .closest(".control")
-    .before(globalSettingsNote);
   const stages = [
     "Boundary",
     "Seed points",
@@ -96,6 +94,20 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
   let stage = 0,
     timer;
   const $ = (id) => pane.querySelector("#" + id);
+  const loading = document.createElement("div");
+  loading.className = "voronoi-loading";
+  loading.hidden = true;
+  loading.setAttribute("role", "status");
+  loading.innerHTML = '<span aria-hidden="true"></span>Processing…';
+  pane.append(loading);
+  let backgroundTasks = 0;
+  function updateLoading() {
+    loading.hidden = !pending && backgroundTasks === 0;
+  }
+  function setPending(value) {
+    pending = value;
+    updateLoading();
+  }
   function storeZone() {
     if (!boundary || !zoneConfigs[activeZone]) return;
     for (const id of zoneFields)
@@ -146,6 +158,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
   }
   function restoreBoundary(params) {
     boundary = structuredClone(params.boundary ?? null);
+    legacyRectangle = !boundary && !params.empty;
     zoneConfigs = structuredClone(
       params.zoneSettings ?? (boundary ? defaultZoneSettings(boundary) : []),
     );
@@ -218,13 +231,13 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     stage = 0;
     generate("prepare");
   }
-  $("vBoundaryDemo").onclick = () =>
-    importBoundary(demoBoundary()).catch(
-      (e) => ($("vStatus").textContent = e.message),
-    );
+  $("vUploadPrompt").onclick = () => $("vBoundaryFile").click();
   $("vBoundaryFile").onchange = async () => {
     const file = $("vBoundaryFile").files[0];
     if (!file) return;
+    remember(captureUndo());
+    backgroundTasks++;
+    updateLoading();
     try {
       if (file.size > 50 * 1024 * 1024)
         throw Error("Use a Rhino file smaller than 50 MB.");
@@ -324,6 +337,8 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     } catch (e) {
       $("vStatus").textContent = e.message;
     } finally {
+      backgroundTasks--;
+      updateLoading();
       $("vBoundaryFile").value = "";
     }
   };
@@ -374,16 +389,25 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
   }
   floorUI();
   function stashFloor() {
-    floorState[activeFloor].snapshot = {
+    floorState[activeFloor].snapshot = captureFloor();
+  }
+  function captureFloor() {
+    return {
       params: parameters(),
-      result: result ? structuredClone(result) : null,
+      result,
       editing: editing?.save(),
       view: { activeZone, showAllZones },
       stage,
       wire,
+      ghosted,
     };
   }
-  function restoreFloor(snapshot, autoBuild = true, keepStage = false) {
+  function restoreFloor(
+    snapshot,
+    autoBuild = true,
+    keepStage = false,
+    exactStage = false,
+  ) {
     const previousStage = stage;
     const params = snapshot.params;
     restoreBoundary(params);
@@ -393,13 +417,14 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
         $("vn_" + id).value = $("v_" + id).value = params[id];
     zoneUI(!!boundary);
     editing?.load(snapshot.editing);
-    result = snapshot.result ? structuredClone(snapshot.result) : null;
+    result = snapshot.result ?? null;
     stage = keepStage
       ? previousStage
-      : [3, 5, 6].includes(snapshot.stage)
+      : !exactStage && [3, 5, 6].includes(snapshot.stage)
         ? 4
         : (snapshot.stage ?? 0);
     wire = !!snapshot.wire;
+    ghosted = !!snapshot.ghosted;
     fitNext = true;
     draw();
     if (autoBuild && !result && !pending) generate("prepare");
@@ -416,8 +441,9 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     if (floorState[activeFloor].snapshot)
       restoreFloor(floorState[activeFloor].snapshot, true, true);
     else {
-      boundary = demoBoundary();
-      zoneConfigs = defaultZoneSettings(boundary, activeFloor);
+      boundary = null;
+      legacyRectangle = false;
+      zoneConfigs = [];
       populatedZones = [];
       activeZone = 0;
       result = null;
@@ -485,6 +511,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     pending = false,
     mode = "roof",
     wire = false,
+    ghosted = false,
     fitNext = true;
   const scene = new T.Scene(),
     group = new T.Group();
@@ -505,6 +532,278 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
   });
   const orbit = new OrbitControls(camera, renderers[0].domElement);
   orbit.enableDamping = true;
+  const sectionPlane = new T.Plane(new T.Vector3(0, 0, 1), 0);
+  const sectionCuts = new T.Group();
+  scene.add(sectionCuts);
+  let sectionCutsDirty = true;
+  const sectionPivot = new T.Object3D();
+  const sectionOutline = new T.PlaneHelper(sectionPlane, 1, 0xffffff);
+  const sectionControl = new TransformControls(camera, renderers[0].domElement);
+  const sectionGizmo = sectionControl.getHelper();
+  let sectionEnabled = false;
+  let orbitBeforeSectionDrag = true;
+  sectionControl.setMode("translate");
+  sectionControl.setSize(0.85);
+  sectionControl.setColors(0x9af4f9, 0x21e0ed, 0x789fe8, 0xffffff);
+  sectionControl.enabled = false;
+  sectionOutline.visible = false;
+  const sectionOverlay = new T.Scene();
+  sectionOverlay.add(sectionGizmo);
+  scene.add(sectionPivot, sectionOutline);
+  function updateSectionPlane() {
+    sectionCutsDirty = true;
+    const normal = new T.Vector3(0, 0, 1).applyQuaternion(
+      sectionPivot.quaternion,
+    );
+    sectionPlane.setFromNormalAndCoplanarPoint(normal, sectionPivot.position);
+  }
+  sectionControl.addEventListener("objectChange", updateSectionPlane);
+  const sectionCanvas = renderers[0].domElement;
+  const degreeEntry = document.createElement("input");
+  degreeEntry.type = "number";
+  degreeEntry.step = "any";
+  degreeEntry.className = "section-degree-entry";
+  degreeEntry.hidden = true;
+  sectionCanvas.parentElement.append(degreeEntry);
+  const axes = {
+    X: new T.Vector3(1, 0, 0),
+    Y: new T.Vector3(0, 1, 0),
+    Z: new T.Vector3(0, 0, 1),
+  };
+  let rotationAxis;
+  let press;
+  let release;
+  sectionCanvas.addEventListener(
+    "pointerdown",
+    (event) => {
+      press = { x: event.clientX, y: event.clientY, moved: false };
+      release = null;
+    },
+    true,
+  );
+  sectionCanvas.addEventListener(
+    "pointermove",
+    (event) => {
+      if (
+        press &&
+        Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4
+      ) {
+        press.moved = true;
+      }
+    },
+    true,
+  );
+  sectionCanvas.addEventListener(
+    "pointerup",
+    (event) => {
+      release =
+        press &&
+        !press.moved &&
+        Math.hypot(event.clientX - press.x, event.clientY - press.y) <= 4
+          ? event
+          : null;
+      press = null;
+    },
+    true,
+  );
+  sectionControl.addEventListener("mouseUp", () => {
+    const axis = sectionControl.axis;
+    if (!release || !axes[axis]) return;
+    rotationAxis = axes[axis];
+    degreeEntry.setAttribute(
+      "aria-label",
+      `Rotate clipping plane about ${axis} in degrees`,
+    );
+    degreeEntry.placeholder = `${axis} degrees`;
+    degreeEntry.value = "";
+    degreeEntry.style.left = `${Math.max(4, Math.min(release.clientX + 10, innerWidth - 120))}px`;
+    degreeEntry.style.top = `${Math.max(4, Math.min(release.clientY + 6, innerHeight - 42))}px`;
+    degreeEntry.hidden = false;
+    degreeEntry.focus({ preventScroll: true });
+  });
+  degreeEntry.addEventListener("blur", () => {
+    degreeEntry.hidden = true;
+  });
+  degreeEntry.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.key === "Escape") degreeEntry.blur();
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const degrees = degreeEntry.valueAsNumber;
+    if (!Number.isFinite(degrees)) return;
+    remember(captureUndo());
+    sectionPivot.rotateOnWorldAxis(
+      rotationAxis,
+      T.MathUtils.degToRad(degrees % 360),
+    );
+    updateSectionPlane();
+    degreeEntry.blur();
+  });
+  sectionControl.addEventListener("dragging-changed", ({ value }) => {
+    if (value) {
+      orbitBeforeSectionDrag = orbit.enabled;
+      orbit.enabled = false;
+    } else {
+      orbit.enabled = orbitBeforeSectionDrag;
+    }
+  });
+  $("vSection").onclick = () => {
+    degreeEntry.hidden = true;
+    sectionEnabled = !sectionEnabled;
+    sectionControl.enabled = sectionEnabled;
+    sectionOutline.visible = sectionEnabled;
+    if (sectionEnabled) {
+      sectionControl.setMode("translate");
+      sectionPivot.position.copy(orbit.target);
+      updateSectionPlane();
+      sectionOutline.size = Math.max(
+        result?.params.width ?? 10,
+        result?.params.height ?? 10,
+      );
+      sectionControl.attach(sectionPivot);
+    } else {
+      sectionControl.detach();
+    }
+    syncSectionButtons();
+    draw();
+  };
+  $("vSectionMove").onclick = () => {
+    const moving = sectionControl.getMode() === "rotate";
+    sectionControl.setMode(moving ? "translate" : "rotate");
+    syncSectionButtons();
+  };
+  function syncSectionButtons() {
+    $("vSection").setAttribute("aria-pressed", sectionEnabled);
+    $("vSectionMove").hidden = !sectionEnabled;
+    const rotating = sectionControl.getMode() === "rotate";
+    $("vSectionMove").textContent = rotating ? "MOVE PLANE" : "ROTATE PLANE";
+    $("vSectionMove").setAttribute("aria-pressed", rotating);
+  }
+
+  const journal = new UndoJournal();
+  function captureUndo() {
+    const floors = floorState.map((floor, index) => ({
+      ...floor,
+      snapshot:
+        index === activeFloor
+          ? captureFloor()
+          : floor.snapshot && { ...floor.snapshot },
+    }));
+    // Worker results are replaced, so keep references to the large mesh buffers.
+    const signature = JSON.stringify({
+      floors: floors.map(({ snapshot, ...floor }) => ({
+        ...floor,
+        snapshot: snapshot && { ...snapshot, result: undefined },
+      })),
+      activeFloor,
+      isolateZone,
+      mode,
+      pickZone,
+      sectionEnabled,
+      cameraPosition: camera.position.toArray(),
+      orbitTarget: orbit.target.toArray(),
+      sectionMode: sectionControl.getMode(),
+      position: sectionPivot.position.toArray(),
+      rotation: sectionPivot.quaternion.toArray(),
+    });
+    return { floors, signature };
+  }
+  function sameUndoState(a, b) {
+    return (
+      a.signature === b.signature &&
+      a.floors.every(
+        (floor, index) =>
+          floor.snapshot?.result === b.floors[index].snapshot?.result,
+      )
+    );
+  }
+  function remember(entry) {
+    if (pending || backgroundTasks || !entry) return;
+    if (!journal.length || !sameUndoState(entry, journal.peek()))
+      journal.push(entry);
+    $("vUndo").disabled = !journal.length;
+  }
+  function undo() {
+    if (pending || backgroundTasks) return;
+    const current = captureUndo();
+    while (journal.length && sameUndoState(journal.peek(), current))
+      journal.pop();
+    const entry = journal.pop();
+    $("vUndo").disabled = !journal.length;
+    if (!entry) return;
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      $("vPlay").textContent = "PLAY STEPS";
+    }
+    const state = JSON.parse(entry.signature);
+    ({ activeFloor, isolateZone, mode, pickZone, sectionEnabled } = state);
+    floorState.splice(0, floorState.length, ...entry.floors);
+    floorUI();
+    $("vIsolateZone").checked = isolateZone;
+    sectionPivot.position.fromArray(state.position);
+    sectionPivot.quaternion.fromArray(state.rotation);
+    sectionControl.setMode(state.sectionMode);
+    sectionControl.enabled = sectionEnabled;
+    if (sectionEnabled) sectionControl.attach(sectionPivot);
+    else sectionControl.detach();
+    sectionOutline.visible = sectionEnabled;
+    degreeEntry.hidden = true;
+    updateSectionPlane();
+    syncSectionButtons();
+    restoreFloor(floorState[activeFloor].snapshot, false, false, true);
+    camera.position.fromArray(state.cameraPosition);
+    orbit.target.fromArray(state.orbitTarget);
+    orbit.update();
+    updateFloorReport();
+    $("vStatus").textContent = "Last workspace action undone.";
+  }
+  $("vUndo").onclick = undo;
+  window.addEventListener("keydown", (event) => {
+    if (!pane.hidden && isUndoShortcut(event)) {
+      event.preventDefault();
+      undo();
+    }
+  });
+  let inputStart;
+  pane.addEventListener("focusin", ({ target }) => {
+    if (target.matches("input, select") && target !== degreeEntry)
+      inputStart = captureUndo();
+  });
+  pane.addEventListener(
+    "pointerdown",
+    ({ target }) => {
+      if (target.matches("canvas")) remember(captureUndo());
+      else if (target.matches("input, select") && target !== degreeEntry)
+        inputStart = captureUndo();
+    },
+    true,
+  );
+  pane.addEventListener(
+    "change",
+    ({ target }) => {
+      if (target === degreeEntry || target.type === "file") return;
+      remember(inputStart);
+      inputStart = null;
+      queueMicrotask(() => {
+        if (document.activeElement === target) inputStart = captureUndo();
+      });
+    },
+    true,
+  );
+  pane.addEventListener(
+    "click",
+    ({ target }) => {
+      const button = target.closest("button");
+      if (button && !button.matches("#vUndo, #vObj, #v3dm, #vSave"))
+        remember(captureUndo());
+    },
+    true,
+  );
+  sectionCanvas.addEventListener("wheel", () => remember(captureUndo()), {
+    capture: true,
+    passive: true,
+  });
   const diagram = new T.Scene();
   function resize() {
     renderers.forEach((r, i) => {
@@ -589,7 +888,126 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     plan.lookAt(x0 + w / 2, y0 + h / 2, z0);
     resize();
   }
+  const enclosurePreviews = new WeakMap();
+  function softenEnclosure(raw, floor) {
+    const cached = enclosurePreviews.get(raw);
+    if (cached?.floor === floor) return cached.mesh;
+    const neighbors = Array.from(
+      { length: raw.positions.length / 3 },
+      () => new Set(),
+    );
+    for (let i = 0; i < raw.indices.length; i += 3) {
+      for (let j = 0; j < 3; j++) {
+        const a = raw.indices[i + j],
+          b = raw.indices[i + ((j + 1) % 3)];
+        neighbors[a].add(b);
+        neighbors[b].add(a);
+      }
+    }
+    const movable = neighbors.map(
+      (ring, i) =>
+        ring.size > 0 && Math.abs(raw.positions[i * 3 + 2] - floor) > 1e-5,
+    );
+    let positions = Float64Array.from(raw.positions);
+    let next = positions.slice();
+    for (let pass = 0; pass < 24; pass++) {
+      for (let i = 0; i < neighbors.length; i++) {
+        if (!movable[i]) continue;
+        const ring = neighbors[i];
+        for (let axis = 0; axis < 3; axis++) {
+          let sum = 0;
+          for (const j of ring) sum += positions[j * 3 + axis];
+          const k = i * 3 + axis;
+          const value = positions[k] + 0.42 * (sum / ring.size - positions[k]);
+          next[k] =
+            axis === 2 && raw.positions[k] >= floor
+              ? Math.max(floor, value)
+              : value;
+        }
+      }
+      [positions, next] = [next, positions];
+    }
+    const mesh = { positions, indices: raw.indices };
+    enclosurePreviews.set(raw, { floor, mesh });
+    return mesh;
+  }
+  function enclosureGeometry(raw) {
+    const g = geometry(raw);
+    const smooth = toCreasedNormals(g, Math.PI * 0.65);
+    if (smooth !== g) g.dispose();
+    return smooth;
+  }
+  function updateSectionCuts() {
+    sectionCutsDirty = false;
+    clear(sectionCuts);
+    if (!sectionEnabled || stage < 4) return;
+    group.updateMatrixWorld(true);
+    const inverse = new T.Matrix4();
+    const localPlane = new T.Plane();
+    const vertices = Array.from({ length: 3 }, () => new T.Vector3());
+    const distances = new Float64Array(3);
+    const point = new T.Vector3();
+    const epsilon = 1e-7;
+    group.traverseVisible((mesh) => {
+      if (!mesh.isMesh || !mesh.material.clippingPlanes?.includes(sectionPlane))
+        return;
+      const geometry = mesh.geometry;
+      const position = geometry.getAttribute("position");
+      const index = geometry.getIndex();
+      inverse.copy(mesh.matrixWorld).invert();
+      localPlane.copy(sectionPlane).applyMatrix4(inverse);
+      if (!geometry.boundingBox) geometry.computeBoundingBox();
+      if (!localPlane.intersectsBox(geometry.boundingBox)) return;
+      const segments = [];
+      for (let i = 0; i < (index?.count ?? position.count); i += 3) {
+        for (let j = 0; j < 3; j++) {
+          vertices[j].fromBufferAttribute(
+            position,
+            index ? index.getX(i + j) : i + j,
+          );
+          const distance = localPlane.distanceToPoint(vertices[j]);
+          distances[j] = Math.abs(distance) <= epsilon ? 0 : distance;
+        }
+        if (
+          Math.min(distances[0], distances[1], distances[2]) >= 0 ||
+          Math.max(distances[0], distances[1], distances[2]) < 0
+        )
+          continue;
+        const start = segments.length;
+        for (let j = 0; j < 3; j++) {
+          const k = (j + 1) % 3;
+          const a = distances[j],
+            b = distances[k];
+          if (a === 0) point.copy(vertices[j]);
+          else if (a * b < 0)
+            point.copy(vertices[j]).lerp(vertices[k], a / (a - b));
+          else continue;
+          point.applyMatrix4(mesh.matrixWorld);
+          segments.push(point.x, point.y, point.z);
+        }
+        if (segments.length - start !== 6) segments.length = start;
+      }
+      if (!segments.length) return;
+      const lines = new LineSegments2(
+        new LineSegmentsGeometry().setPositions(segments),
+        new LineMaterial({
+          color: 0xffffff,
+          linewidth: 2,
+          clipping: true,
+          clippingPlanes: mesh.material.clippingPlanes.filter(
+            (plane) => plane !== sectionPlane,
+          ),
+          polygonOffset: true,
+          polygonOffsetFactor: -1,
+          polygonOffsetUnits: -2,
+        }),
+      );
+      lines.renderOrder = 2;
+      sectionCuts.add(lines);
+    });
+  }
   function draw() {
+    sectionCutsDirty = true;
     for (const o of zonePickTargets) {
       o.geometry.dispose();
       o.material.dispose();
@@ -604,6 +1022,16 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
           : f.snapshot?.params,
       result: i === activeFloor ? result : f.snapshot?.result,
     }));
+    $("vUploadPrompt").hidden = !!(
+      boundary ||
+      result ||
+      floorSources.some(
+        (source) =>
+          source.visible &&
+          !isolateZone &&
+          (source.params?.boundary || source.result),
+      )
+    );
     for (const source of floorSources) {
       if (!source.visible || (isolateZone && source.floor !== activeFloor))
         continue;
@@ -693,10 +1121,12 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
               ),
             };
           const mesh = new T.Mesh(
-            geometry(raw),
+            enclosureGeometry(
+              stage === 7 ? softenEnclosure(raw, r.params.floor) : raw,
+            ),
             new T.MeshPhysicalMaterial({
               color: 0x4e9fa9,
-              roughness: 0.3,
+              roughness: 0.55,
               metalness: 0.2,
               side: T.DoubleSide,
             }),
@@ -784,7 +1214,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     if (stage === 7 || stage === 6) {
       const mat = new T.MeshPhysicalMaterial({
         color: 0x4e9fa9,
-        roughness: 0.3,
+        roughness: 0.55,
         metalness: 0.2,
         side: T.DoubleSide,
         wireframe: false,
@@ -807,9 +1237,8 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
               .flat(),
           ),
         };
-      const g = geometry(raw),
-        smooth = toCreasedNormals(g, Math.PI / 4);
-      if (smooth !== g) g.dispose();
+      if (stage === 7) raw = softenEnclosure(raw, result.params.floor);
+      const smooth = enclosureGeometry(raw);
       const mesh = new T.Mesh(smooth, mat),
         lines = quadWire(raw);
       lines.visible = wire;
@@ -985,6 +1414,25 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       for (const child of [...group.children])
         if (!child.userData.otherFloor) child.visible = false;
     }
+    $("vGhost").setAttribute("aria-pressed", ghosted);
+    if (ghosted) {
+      for (const mesh of group.children) {
+        if (!mesh.isMesh || mesh.userData.otherFloor) continue;
+        mesh.material.transparent = true;
+        mesh.material.opacity = 0.35;
+        mesh.material.depthWrite = false;
+      }
+    }
+    if (sectionEnabled && stage >= 4) {
+      group.traverse((object) => {
+        if (!object.material || (!object.isMesh && !object.isLineSegments))
+          return;
+        object.material.clippingPlanes = [
+          ...(object.material.clippingPlanes ?? []),
+          sectionPlane,
+        ];
+      });
+    }
     editing?.update(balloonMeshes, pending);
   }
   function updateFloorReport() {
@@ -1038,6 +1486,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     return {
       unclippedBalloons: true,
       clipFloor: true,
+      empty: !legacyRectangle,
       width,
       height: width * 0.625,
       ...Object.fromEntries(
@@ -1047,19 +1496,19 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     };
   }
   function generate(populate = false) {
-    if (pending) return;
+    if (pending || (!boundary && !legacyRectangle)) return;
     if ((populate === "floor" || populate === "prepare") && boundary)
       populatedZones = populateAllZones(parameters()).populatedZones;
     if (populate === true && boundary && !populatedZones.includes(activeZone))
       populatedZones.push(activeZone);
     zoneUI(false);
-    pending = true;
+    setPending(true);
     editing?.setBusy(true);
-    $("vStatus").textContent = "Building footprint, roof and flat floor…";
+    $("vStatus").textContent = "Updating balloons and enclosure…";
     $("vGenerate").disabled = $("vPopulateCanvas").disabled = true;
     worker ??= workerFactory();
     worker.onmessage = ({ data }) => {
-      pending = false;
+      setPending(false);
       $("vGenerate").disabled = $("vPopulateCanvas").disabled = false;
       if (data.error) {
         editing?.rejectBuild();
@@ -1116,8 +1565,9 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
         generate();
     };
     worker.onerror = (e) => {
+      editing?.rejectBuild();
       editing?.setBusy(false);
-      pending = false;
+      setPending(false);
       $("vGenerate").disabled = $("vPopulateCanvas").disabled = false;
       $("vStatus").textContent = e.message;
     };
@@ -1330,7 +1780,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
         "Import at least one zoned floor outline first.";
       return;
     }
-    pending = true;
+    setPending(true);
     editing?.setBusy(true);
     const locked = [...pane.querySelectorAll("input,button,select")].map(
       (el) => [el, el.disabled],
@@ -1357,7 +1807,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       next.forEach((f, i) => Object.assign(floorState[i], f));
       isolateZone = false;
       $("vIsolateZone").checked = false;
-      pending = false;
+      setPending(false);
       restoreFloor(floorState[activeFloor].snapshot);
       $("vStatus").textContent =
         `All zones populated across ${targets.length} loaded floor(s). Existing edits retained.`;
@@ -1365,7 +1815,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       $("vStatus").textContent = e.message;
     } finally {
       batchWorker.terminate();
-      pending = false;
+      setPending(false);
       locked.forEach(([el, disabled]) => (el.disabled = disabled));
       editing?.setBusy(false);
       draw();
@@ -1421,6 +1871,10 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       draw();
     }, 1800);
   };
+  $("vGhost").onclick = () => {
+    ghosted = !ghosted;
+    draw();
+  };
   $("vWire").onclick = () => {
     wire = !wire;
     $("vWire").setAttribute("aria-pressed", wire);
@@ -1450,11 +1904,16 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     return result;
   }
   const guarded = (fn) => async () => {
+    backgroundTasks++;
+    updateLoading();
     try {
       await fn();
     } catch (e) {
       $("vStatus").textContent = e.message;
       $("vProjectMessage").textContent = e.message;
+    } finally {
+      backgroundTasks--;
+      updateLoading();
     }
   };
   $("vObj").onclick = guarded(() => {
@@ -1496,9 +1955,11 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     const file = $("vLoad").files[0];
     if (!file) return;
     $("vProjectMessage").textContent = `Opening ${file.name}…`;
+    const before = captureUndo();
     const data = JSON.parse(await file.text());
     if (data.format !== "voronoi-balloons")
       throw Error("Open a Voronoi Balloons project.");
+    remember(before);
     restoreBoundary(data.params);
     restoreZoneView(data.view);
     editing?.load(data.editing);
@@ -1545,6 +2006,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
         view: { activeZone, showAllZones },
         stage,
         wire,
+        ghosted,
         report: $("vReport").textContent,
       };
     },
@@ -1576,6 +2038,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       }
       stage = Math.max(0, Math.min(7, data.stage ?? 7));
       wire = !!data.wire;
+      ghosted = !!data.ghosted;
       $("vWire").setAttribute("aria-pressed", wire);
       zoneUI(!!boundary);
       editing.load(data.editing);
@@ -1606,7 +2069,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
         if (i === 1) columns.show();
         if (i === 0) {
           resize();
-          if (!result && !pending) generate();
+          if (!result && !pending) draw();
         }
       }),
   );
@@ -1634,16 +2097,26 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
     requestAnimationFrame(frame);
     if (pane.hidden) return;
     orbit.update();
+    if (sectionCutsDirty) updateSectionCuts();
+    renderers[0].localClippingEnabled = true;
     renderers[0].render(scene, camera);
-    editing?.renderPerspective(renderers[0]);
+    if (result) editing?.renderPerspective(renderers[0]);
+    if (sectionEnabled) {
+      renderers[0].autoClear = false;
+      renderers[0].clearDepth();
+      renderers[0].render(sectionOverlay, camera);
+      renderers[0].autoClear = true;
+    }
     editing?.beforePlan();
     renderers[1].localClippingEnabled = true;
+    sectionOutline.visible = sectionGizmo.visible = false;
     renderers[1].render(scene, plan);
+    sectionOutline.visible = sectionGizmo.visible = sectionEnabled;
     renderers[1].autoClear = false;
     renderers[1].clearDepth();
     renderers[1].render(diagram, plan);
     renderers[1].autoClear = true;
-    editing?.renderPlan(renderers[1], plan);
+    if (result) editing?.renderPlan(renderers[1], plan);
     editing?.afterPlan();
   }
   frame();
