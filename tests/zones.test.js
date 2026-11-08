@@ -417,6 +417,7 @@ test("Pop and curve pressure both deform the actual rounded enclosure and leave 
       spacing: 2,
       smoothing: 0,
       unclippedBalloons: true,
+      clipFloor: true,
     };
   const original = structuredClone(p),
     base = zonedVoronoiBuild(m, p),
