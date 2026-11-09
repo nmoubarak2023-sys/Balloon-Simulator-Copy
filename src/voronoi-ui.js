@@ -18,7 +18,13 @@ import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { toCreasedNormals } from "three/addons/utils/BufferGeometryUtils.js";
 import { geometry, rawGeometry, quadWire } from "./view.js";
 import { addRhinoQuadMesh } from "./rhino-io.js";
-export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
+export function initVoronoi(
+  workerFactory,
+  rhino,
+  useAsBoundary,
+  party,
+  showBalloonBuild,
+) {
   const existing = document.querySelector("main"),
     pane = document.createElement("main");
   pane.id = "voronoiWorkspace";
@@ -914,16 +920,22 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
       for (let i = 0; i < neighbors.length; i++) {
         if (!movable[i]) continue;
         const ring = neighbors[i];
-        for (let axis = 0; axis < 3; axis++) {
-          let sum = 0;
-          for (const j of ring) sum += positions[j * 3 + axis];
-          const k = i * 3 + axis;
-          const value = positions[k] + 0.42 * (sum / ring.size - positions[k]);
-          next[k] =
-            axis === 2 && raw.positions[k] >= floor
-              ? Math.max(floor, value)
-              : value;
+        let sumX = 0,
+          sumY = 0,
+          sumZ = 0;
+        for (const j of ring) {
+          const neighbor = j * 3;
+          sumX += positions[neighbor];
+          sumY += positions[neighbor + 1];
+          sumZ += positions[neighbor + 2];
         }
+        const k = i * 3;
+        next[k] = positions[k] + 0.42 * (sumX / ring.size - positions[k]);
+        next[k + 1] =
+          positions[k + 1] + 0.42 * (sumY / ring.size - positions[k + 1]);
+        const z =
+          positions[k + 2] + 0.42 * (sumZ / ring.size - positions[k + 2]);
+        next[k + 2] = raw.positions[k + 2] >= floor ? Math.max(floor, z) : z;
       }
       [positions, next] = [next, positions];
     }
@@ -1094,10 +1106,11 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
               mesh.position.set(...s.center);
               mesh.scale.fromArray(s.axisScale || [1, 1, 1]);
             }
-            const lines = quadWire(s.raw || rawGeometry(mesh.geometry));
-            lines.visible = wire;
-            lines.material.clippingPlanes = mesh.material.clippingPlanes;
-            mesh.add(lines);
+            if (wire) {
+              const lines = quadWire(s.raw || rawGeometry(mesh.geometry));
+              lines.material.clippingPlanes = mesh.material.clippingPlanes;
+              mesh.add(lines);
+            }
             mesh.userData.otherFloor = true;
             group.add(mesh);
           }
@@ -1239,10 +1252,8 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
         };
       if (stage === 7) raw = softenEnclosure(raw, result.params.floor);
       const smooth = enclosureGeometry(raw);
-      const mesh = new T.Mesh(smooth, mat),
-        lines = quadWire(raw);
-      lines.visible = wire;
-      mesh.add(lines);
+      const mesh = new T.Mesh(smooth, mat);
+      if (wire) mesh.add(quadWire(raw));
       group.add(mesh);
     } else if (stage === 4 || stage === 5) {
       const { width: w, height: h, floor } = result.params;
@@ -1280,14 +1291,15 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
           mesh.position.set(...s.center);
           mesh.scale.fromArray(s.axisScale || [1, 1, 1]);
         }
-        const lines = quadWire(s.raw || rawGeometry(mesh.geometry));
-        lines.material.clippingPlanes = result.params.unclippedBalloons
-          ? []
-          : stage === 4
-            ? planes.slice(0, 4)
-            : planes;
-        lines.visible = wire;
-        mesh.add(lines);
+        if (wire) {
+          const lines = quadWire(s.raw || rawGeometry(mesh.geometry));
+          lines.material.clippingPlanes = result.params.unclippedBalloons
+            ? []
+            : stage === 4
+              ? planes.slice(0, 4)
+              : planes;
+          mesh.add(lines);
+        }
         mesh.userData.balloonId = s.id;
         balloonMeshes.push(mesh);
         group.add(mesh);
@@ -2067,6 +2079,7 @@ export function initVoronoi(workerFactory, rhino, useAsBoundary, party) {
         );
         if (i === 3) party.show();
         if (i === 1) columns.show();
+        if (i === 2) showBalloonBuild();
         if (i === 0) {
           resize();
           if (!result && !pending) draw();
