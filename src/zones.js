@@ -189,7 +189,7 @@ export function partitionCurves(
     if (!groups.has(r)) groups.set(r, []);
     groups.get(r).push(t);
   });
-  const zones = [];
+  let zones = [];
   for (const group of groups.values()) {
     const boundaryEdges = new Map();
     let area = 0,
@@ -236,14 +236,28 @@ export function partitionCurves(
     zones.push({ loops, area, center: [cx / area, cy / area] });
   }
   zones.sort((a, b) => b.center[1] - a.center[1] || a.center[0] - b.center[0]);
-  if (zones.length > 20)
-    throw Error("Use no more than 20 zones per perimeter.");
   const sum = zones.reduce((s, z) => s + z.area, 0),
     outerArea = Math.abs(polygonArea(perimeter));
   if (Math.abs(sum - outerArea) > Math.max(tol * outerArea, 1e-5))
     throw Error(
       "Zones do not cover the perimeter consistently. Repair the boundary curves.",
     );
+  let fragmentWarning;
+  if (zones.length > 20 && closed.length === curves.length) {
+    // Independently sampled closed outlines can leave slivers along shared edges.
+    const substantial = zones.filter((zone) => zone.area > outerArea * 0.00005);
+    const fragmentArea =
+      sum - substantial.reduce((area, zone) => area + zone.area, 0);
+    if (substantial.length && fragmentArea <= outerArea * 0.0002) {
+      fragmentWarning =
+        "Ignored " +
+        (zones.length - substantial.length) +
+        " tiny fragments along shared curve edges.";
+      zones = substantial;
+    }
+  }
+  if (zones.length > 20)
+    throw Error("Use no more than 20 zones per perimeter.");
   return {
     perimeter,
     dividers: curves
@@ -255,8 +269,9 @@ export function partitionCurves(
     tolerance: tol,
     sourceName,
     units: "feet",
-    warnings:
-      curves.length > 1 && zones.length === 1
+    warnings: fragmentWarning
+      ? [fragmentWarning]
+      : curves.length > 1 && zones.length === 1
         ? [
             "Divider curves do not close any zones. Snap their endpoints to the perimeter or to another divider in Rhino.",
           ]

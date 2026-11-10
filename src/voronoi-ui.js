@@ -1,3 +1,4 @@
+import { initFacade } from "./facade-ui.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
@@ -33,9 +34,12 @@ export function initVoronoi(
   nav.className = "simulation-tabs";
   nav.setAttribute("aria-label", "Simulation workspaces");
   nav.innerHTML =
-    '<button aria-pressed="true">VORONOI BALLOONS</button><button aria-pressed="false">COLUMN POPulate</button>';
+    '<button aria-pressed="true">VORONOI BALLOONS</button><button aria-pressed="false">COLUMN POPulate</button><button aria-pressed="false" aria-controls="facadeWorkspace">FACADE DESIGN</button>';
   existing.before(nav);
-  existing.after(pane);
+  const facade = document.createElement("main");
+  facade.id = "facadeWorkspace";
+  facade.hidden = true;
+  existing.after(pane, facade);
   const fields = [
     ["count", "Seed point count", 40, 1, 150, 1],
     ["seed", "Point seed", 42, 0, 9999, 1],
@@ -97,6 +101,7 @@ export function initVoronoi(
     '</select><button id="vNext">NEXT →</button><button id="vPlay">PLAY STEPS</button><p id="vStepDescription" class="note"></p>';
   pane.querySelector(".canvas-tools").after(stepbar);
   let anchorDown;
+  let resetStepMenu = false;
   let stage = 0,
     timer;
   const $ = (id) => pane.querySelector("#" + id);
@@ -242,6 +247,7 @@ export function initVoronoi(
     const file = $("vBoundaryFile").files[0];
     if (!file) return;
     remember(captureUndo());
+    $("vProjectMessage").hidden = true;
     backgroundTasks++;
     updateLoading();
     try {
@@ -342,6 +348,8 @@ export function initVoronoi(
         `Imported ${boundaries.length} floor(s), ordered bottom to top: ${boundaries.map((b, i) => `Floor ${i + 1}: Z=${b.elevation.toFixed(3)} ft, ${b.zones.length} zones`).join("; ")}. Only the active floor generates its simulation. Other floors retain their own state.`;
     } catch (e) {
       $("vStatus").textContent = e.message;
+      $("vProjectMessage").textContent = e.message;
+      $("vProjectMessage").hidden = false;
     } finally {
       backgroundTasks--;
       updateLoading();
@@ -404,6 +412,7 @@ export function initVoronoi(
       editing: editing?.save(),
       view: { activeZone, showAllZones },
       stage,
+      resetStepMenu,
       wire,
       ghosted,
     };
@@ -414,7 +423,7 @@ export function initVoronoi(
     keepStage = false,
     exactStage = false,
   ) {
-    const previousStage = stage;
+    resetStepMenu = keepStage || !!snapshot.resetStepMenu;
     const params = snapshot.params;
     restoreBoundary(params);
     restoreZoneView(snapshot.view);
@@ -424,9 +433,8 @@ export function initVoronoi(
     zoneUI(!!boundary);
     editing?.load(snapshot.editing);
     result = snapshot.result ?? null;
-    stage = keepStage
-      ? previousStage
-      : !exactStage && [3, 5, 6].includes(snapshot.stage)
+    stage =
+      !exactStage && !keepStage && [3, 5, 6].includes(snapshot.stage)
         ? 4
         : (snapshot.stage ?? 0);
     wire = !!snapshot.wire;
@@ -444,9 +452,16 @@ export function initVoronoi(
     }
     stashFloor();
     activeFloor = Number($("vFloor").value);
+    resetStepMenu = true;
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      $("vPlay").textContent = "PLAY STEPS";
+    }
     if (floorState[activeFloor].snapshot)
       restoreFloor(floorState[activeFloor].snapshot, true, true);
     else {
+      stage = 0;
       boundary = null;
       legacyRectangle = false;
       zoneConfigs = [];
@@ -1083,6 +1098,7 @@ export function initVoronoi(
     if (!isolateZone)
       floorState.forEach((f, i) => {
         if (i === activeFloor || !f.visible || !f.snapshot) return;
+        const stage = f.snapshot.stage ?? 0;
         const r = f.snapshot.result,
           b = f.snapshot.params.boundary;
         if (r?.spheres.length && (stage === 4 || stage === 5)) {
@@ -1211,6 +1227,21 @@ export function initVoronoi(
           }
           o.renderOrder = -1;
         });
+    const descriptions = [
+      "Imported outer perimeter and subdivision zones.",
+      "Deterministic candidate centers inside the rectangle.",
+      "Original Voronoi territories for every seed.",
+      "Click a Voronoi center to set the anchor index and rebuild its nearest cluster. Drag empty space to orbit.",
+      "Full balloons grow from seeds inside the imported curves; zone and perimeter edges do not cut them. The underside is clipped at the floor plate.",
+      "Sphere preview split at the horizontal floor plane.",
+      "Union of original sphere sections, filled as one floor footprint.",
+      "Union of the actual rounded balloon meshes. The rounded surfaces are retained, with a flat cut only at the floor plate.",
+    ];
+    const menuStage = resetStepMenu ? 0 : stage;
+    $("vStage").value = menuStage;
+    $("vStepDescription").textContent = descriptions[menuStage];
+    $("vPrevious").disabled = menuStage === 0;
+    $("vNext").disabled = menuStage === 7;
     if (!result) return;
     $("vPickAnchor").setAttribute("aria-pressed", stage >= 1 && stage <= 3);
     $("vRoof").setAttribute("aria-pressed", stage === 7);
@@ -1305,20 +1336,6 @@ export function initVoronoi(
         group.add(mesh);
       }
     }
-    const descriptions = [
-      "Imported outer perimeter and subdivision zones.",
-      "Deterministic candidate centers inside the rectangle.",
-      "Original Voronoi territories for every seed.",
-      "Click a Voronoi center to set the anchor index and rebuild its nearest cluster. Drag empty space to orbit.",
-      "Full balloons grow from seeds inside the imported curves; zone and perimeter edges do not cut them. The underside is clipped at the floor plate.",
-      "Sphere preview split at the horizontal floor plane.",
-      "Union of original sphere sections, filled as one floor footprint.",
-      "Union of the actual rounded balloon meshes. The rounded surfaces are retained, with a flat cut only at the floor plate.",
-    ];
-    $("vStage").value = stage;
-    $("vStepDescription").textContent = descriptions[stage];
-    $("vPrevious").disabled = stage === 0;
-    $("vNext").disabled = stage === 7;
     const { width: w, height: h } = result.params;
     const perimeter = result.params.boundary?.perimeter ?? [
       [0, 0],
@@ -1542,6 +1559,7 @@ export function initVoronoi(
           timer = null;
           $("vPlay").textContent = "PLAY STEPS";
         }
+        resetStepMenu = false;
         stage = 4;
         mode = "spheres";
       }
@@ -1836,6 +1854,7 @@ export function initVoronoi(
   };
   $("vFit").onclick = fit;
   $("vRoof").onclick = () => {
+    resetStepMenu = false;
     stage = 7;
     mode = "roof";
     $("vRoof").setAttribute("aria-pressed", true);
@@ -1843,6 +1862,7 @@ export function initVoronoi(
     draw();
   };
   $("vSpheres").onclick = () => {
+    resetStepMenu = false;
     stage = 4;
     mode = "spheres";
     $("vRoof").setAttribute("aria-pressed", false);
@@ -1850,6 +1870,7 @@ export function initVoronoi(
     draw();
   };
   $("vStage").onchange = () => {
+    resetStepMenu = false;
     stage = Number($("vStage").value);
     draw();
   };
@@ -1858,6 +1879,8 @@ export function initVoronoi(
     draw();
   };
   $("vNext").onclick = () => {
+    if (resetStepMenu) stage = 0;
+    resetStepMenu = false;
     stage = [0, 1, 2, 4, 7][Math.min(4, [0, 1, 2, 4, 7].indexOf(stage) + 1)];
     draw();
   };
@@ -1868,6 +1891,7 @@ export function initVoronoi(
       $("vPlay").textContent = "PLAY STEPS";
       return;
     }
+    resetStepMenu = false;
     stage = 0;
     draw();
     $("vPlay").textContent = "PAUSE";
@@ -2066,20 +2090,46 @@ export function initVoronoi(
     thumbnail: () => canvasThumbnail(renderers[0], scene, camera),
   });
   const columns = initColumns(rhino, accepted);
+  const showFacade = initFacade(
+    facade,
+    () => {
+      if (pending || backgroundTasks)
+        throw Error("Wait for Voronoi to finish processing.");
+      return floorState
+        .flatMap((floor, index) => {
+          const current = index === activeFloor;
+          const source = current ? boundary : floor.snapshot?.params.boundary;
+          if (!source) return [];
+          return [
+            {
+              loop: source.perimeter,
+              z: source.elevation ?? 0,
+              raw: (current ? result : floor.snapshot?.result)?.raw,
+            },
+          ];
+        })
+        .sort((a, b) => a.z - b.z);
+    },
+    rhino,
+  );
   [...nav.children].forEach(
     (button, i) =>
       (button.onclick = () => {
-        existing.hidden = i !== 2;
+        const facadeSelected =
+          button.getAttribute("aria-controls") === facade.id;
+        facade.hidden = !facadeSelected;
+        if (facadeSelected) showFacade();
+        existing.hidden = facadeSelected || i !== 2;
         pane.hidden = i !== 0;
         party.pane.hidden = i !== 3;
         columns.pane.hidden = i !== 1;
-        document.querySelector(".header-actions").hidden = i !== 2;
+        document.querySelector(".header-actions").hidden = existing.hidden;
         [...nav.children].forEach((b, j) =>
           b.setAttribute("aria-pressed", i === j),
         );
         if (i === 3) party.show();
         if (i === 1) columns.show();
-        if (i === 2) showBalloonBuild();
+        if (!existing.hidden) showBalloonBuild();
         if (i === 0) {
           resize();
           if (!result && !pending) draw();
@@ -2101,6 +2151,7 @@ export function initVoronoi(
     getResult: () => result,
     rebuild: generate,
     showBalloons: () => {
+      resetStepMenu = false;
       stage = 4;
       draw();
     },
