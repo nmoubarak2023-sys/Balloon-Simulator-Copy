@@ -245,10 +245,10 @@ export function partitionCurves(
   let fragmentWarning;
   if (zones.length > 20 && closed.length === curves.length) {
     // Independently sampled closed outlines can leave slivers along shared edges.
-    const substantial = zones.filter((zone) => zone.area > outerArea * 0.00005);
+    const substantial = zones.filter((zone) => zone.area > outerArea * 0.0003);
     const fragmentArea =
       sum - substantial.reduce((area, zone) => area + zone.area, 0);
-    if (substantial.length && fragmentArea <= outerArea * 0.0002) {
+    if (substantial.length && fragmentArea <= outerArea * 0.001) {
       fragmentWarning =
         "Ignored " +
         (zones.length - substantial.length) +
@@ -257,7 +257,7 @@ export function partitionCurves(
     }
   }
   if (zones.length > 20)
-    throw Error("Use no more than 20 zones per perimeter.");
+    throw Error(`Detected ${zones.length} zones. Use no more than 20 zones per perimeter.`);
   return {
     perimeter,
     dividers: curves
