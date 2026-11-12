@@ -8,12 +8,12 @@ import { mountGeometryLibrary, canvasThumbnail } from "./geometry-library.js";
 import { collisionSites, columnMesh } from "./columns.js";
 import { meshQuality } from "./mesh-quality.js";
 import { isUndoShortcut } from "./history.js";
-export function initColumns(rhino, getVoronoi) {
+export function initColumns(rhino, getVoronoi, getFloors) {
   const pane = document.createElement("main");
   pane.id = "columnWorkspace";
   pane.hidden = true;
   document.querySelector("main").after(pane);
-  pane.innerHTML = `<div class="voro-layout"><section class="panel" data-frame-count="1"><div class="panel-heading"><span>PERSPECTIVE <small>01 / COLUMN POPULATE</small></span><button id="cFit">FIT ↗</button></div><div class="canvas-tools"><button id="cPick" aria-pressed="true">PICK COLLISION</button><button id="cGhost" aria-pressed="true">GHOST ENCLOSURE</button><button id="cFocus">FOCUS COLUMN</button><button id="cWire" aria-pressed="false">WIRE</button></div><div id="cPerspective" class="voro-canvas"></div><div class="viewer-footer">PINK MARKERS / COLLISION SEAMS & JUNCTIONS · CLICK TO PLACE A COLUMN</div></section><aside><section class="panel" data-frame-count="2"><div class="panel-heading">PLAN VIEW <small>02 / SUPPORT LOCATIONS</small></div><div id="cPlan" class="voro-plan"></div></section><section class="panel" data-frame-count="3"><div class="panel-heading">CONTROL PANEL <small>03 / COLUMN POPULATE</small></div><div class="voro-controls"><button id="cImport" class="primary">COPY CURRENT VORONOI ↗</button><p class="note">A separate snapshot. Pink markers locate transitions between balloon roof surfaces. Click a marker in either view to place a support, or select a collision below.</p><label>Collision location<select id="cSites"></select></label><button id="cPlace">PLACE AT SELECTED COLLISION ↗</button><label>Placed column<select id="cColumns"></select></label>${[
+  pane.innerHTML = `<div class="voro-layout"><section class="panel" data-frame-count="1"><div class="panel-heading"><span>PERSPECTIVE <small>01 / COLUMN POPULATE</small></span><button id="cFit">FIT ↗</button></div><div class="canvas-tools"><button id="cPick" aria-pressed="true">PICK COLLISION</button><button id="cGhost" aria-pressed="true">GHOST ENCLOSURE</button><button id="cFocus">FOCUS COLUMN</button><button id="cWire" aria-pressed="false">WIRE</button></div><div id="cPerspective" class="voro-canvas"></div><div class="viewer-footer">PINK MARKERS / COLLISION SEAMS & JUNCTIONS · CLICK TO PLACE A COLUMN</div></section><aside><section class="panel" data-frame-count="2"><div class="panel-heading">PLAN VIEW <small>02 / SUPPORT LOCATIONS</small></div><div id="cPlan" class="voro-plan"></div></section><section class="panel" data-frame-count="3"><div class="panel-heading">CONTROL PANEL <small>03 / COLUMN POPULATE</small></div><div class="voro-controls"><label>Working floor<select id="cFloor"></select></label><button id="cImport" class="primary">COPY SELECTED FLOOR ↗</button><p class="note">A separate snapshot. Pink markers locate transitions between balloon roof surfaces. Click a marker in either view to place a support, or select a collision below.</p><label>Collision location<select id="cSites"></select></label><button id="cPlace">PLACE AT SELECTED COLLISION ↗</button><label>Placed column<select id="cColumns"></select></label>${[
     ["Bottom", "Bottom radius (ft)", 1, 0.1, 20, 0.1],
     ["Flare", "Top radius (ft)", 5, 0.1, 30, 0.1],
     ["Blend", "Canopy blend (%)", 55, 10, 90, 1],
@@ -37,6 +37,8 @@ export function initColumns(rhino, getVoronoi) {
     wire = false,
     pick = true,
     history = [];
+  const floorWork = new Map();
+  let workingFloor;
   const scene = new T.Scene(),
     root = new T.Group(),
     markers = new T.Group();
@@ -288,7 +290,55 @@ export function initColumns(rhino, getVoronoi) {
       `${sites.length} collision locations found. Click a pink marker to place a column.`,
     );
   }
-  $("cImport").onclick = guarded(() => accept(getVoronoi()));
+  function selectFloor(index) {
+    if (workingFloor !== undefined && source)
+      floorWork.set(workingFloor, {
+        source,
+        sites,
+        columns,
+        selected,
+        history,
+      });
+    workingFloor = index;
+    const saved = floorWork.get(index);
+    source = saved?.source;
+    sites = saved?.sites ?? [];
+    columns = saved?.columns ?? [];
+    selected = saved?.selected ?? -1;
+    history = saved?.history ?? [];
+    $("cSites").replaceChildren(
+      ...sites.map(
+        (site) =>
+          new Option(
+            site.id +
+              1 +
+              ". " +
+              site.kind +
+              " · X " +
+              site.x.toFixed(2) +
+              ", Y " +
+              site.y.toFixed(2),
+            site.id,
+          ),
+      ),
+    );
+    if (source) {
+      syncSettings();
+      display();
+      fit();
+      status(
+        "Floor " + (index + 1) + " · " + columns.length + " placed column(s).",
+      );
+      return;
+    }
+    $("cColumns").replaceChildren();
+    $("cUndo").disabled = true;
+    $("cReport").textContent = "Copy a Voronoi enclosure to begin.";
+    display();
+    accept(getVoronoi(index));
+  }
+  $("cFloor").onchange = guarded(() => selectFloor(Number($("cFloor").value)));
+  $("cImport").onclick = guarded(() => accept(getVoronoi(workingFloor)));
   $("cPlace").onclick = guarded(() => {
     const site = sites[Number($("cSites").value)];
     if (!site)
@@ -546,12 +596,29 @@ export function initColumns(rhino, getVoronoi) {
     accept,
     show() {
       resize();
-      if (!source) {
+      const { floors, active } = getFloors();
+      const chosen =
+        floors.find((floor) => floor.index === workingFloor) ??
+        floors.find((floor) => floor.index === active) ??
+        floors[0];
+      $("cFloor").replaceChildren(
+        ...floors.map((floor) => new Option(floor.name, floor.index)),
+      );
+      $("cFloor").disabled = !chosen;
+      $("cImport").disabled = !chosen;
+      if (!chosen) return;
+      $("cFloor").value = chosen.index;
+      if (
+        !source ||
+        (workingFloor !== undefined && workingFloor !== chosen.index)
+      ) {
         try {
-          accept(getVoronoi());
-        } catch (e) {
-          status(e.message);
+          selectFloor(chosen.index);
+        } catch (error) {
+          status(error.message);
         }
+      } else {
+        workingFloor = chosen.index;
       }
     },
   };

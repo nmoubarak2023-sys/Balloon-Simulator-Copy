@@ -423,7 +423,7 @@ export function initVoronoi(
     keepStage = false,
     exactStage = false,
   ) {
-    resetStepMenu = keepStage || !!snapshot.resetStepMenu;
+    resetStepMenu = !!snapshot.resetStepMenu;
     const params = snapshot.params;
     restoreBoundary(params);
     restoreZoneView(snapshot.view);
@@ -441,7 +441,8 @@ export function initVoronoi(
     ghosted = !!snapshot.ghosted;
     fitNext = true;
     draw();
-    if (autoBuild && !result && !pending) generate("prepare");
+    if (autoBuild && !result && !pending)
+      generate(keepStage && boundary ? "preview" : "prepare");
   }
   $("vFloor").onchange = () => {
     if (pending) {
@@ -1526,7 +1527,7 @@ export function initVoronoi(
   }
   function generate(populate = false) {
     if (pending || (!boundary && !legacyRectangle)) return;
-    if ((populate === "floor" || populate === "prepare") && boundary)
+    if (["floor", "prepare", "preview"].includes(populate) && boundary)
       populatedZones = populateAllZones(parameters()).populatedZones;
     if (populate === true && boundary && !populatedZones.includes(activeZone))
       populatedZones.push(activeZone);
@@ -1546,8 +1547,7 @@ export function initVoronoi(
         return;
       }
       result = data.result;
-      stashFloor();
-      if (populate === true || populate === "floor") {
+      if (populate === true || populate === "floor" || populate === "preview") {
         if (populate === "floor") {
           showAllZones = true;
           isolateZone = false;
@@ -1563,6 +1563,7 @@ export function initVoronoi(
         stage = 4;
         mode = "spheres";
       }
+      stashFloor();
       draw();
       const q = result.quality;
       $("vReport").textContent = JSON.stringify(
@@ -2089,7 +2090,32 @@ export function initVoronoi(
     },
     thumbnail: () => canvasThumbnail(renderers[0], scene, camera),
   });
-  const columns = initColumns(rhino, accepted);
+  const columns = initColumns(
+    rhino,
+    (index) => {
+      const enclosure =
+        index === activeFloor ? result : floorState[index]?.snapshot?.result;
+      if (!enclosure?.raw?.indices.length)
+        throw Error(
+          "Generate the enclosure for Floor " +
+            (index + 1) +
+            " in Voronoi Balloons first.",
+        );
+      return index === activeFloor ? accepted() : enclosure;
+    },
+    () => ({
+      active: activeFloor,
+      floors: floorState.flatMap((floor, index) =>
+        (
+          index === activeFloor
+            ? boundary || result
+            : floor.snapshot?.params.boundary || floor.snapshot?.result
+        )
+          ? [{ index, name: floor.name }]
+          : [],
+      ),
+    }),
+  );
   const showFacade = initFacade(
     facade,
     () => {
