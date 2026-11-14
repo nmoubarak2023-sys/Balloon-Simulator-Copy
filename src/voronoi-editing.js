@@ -41,20 +41,52 @@ export function createVoronoiEditing({
   const $ = (id) => pane.querySelector("#ve_" + id);
   const tools = document.createElement("div");
   tools.className = "canvas-tools";
-  tools.innerHTML = ["orbit", "move", "scale", "scale1d", "curve", "curveMove"]
+  tools.innerHTML = [
+    "orbit",
+    "move",
+    "scale",
+    "scale1d",
+    "rotate",
+    "curve",
+    "curveMove",
+  ]
     .map(
       (key, i) =>
-        `<button data-ve-tool="${key}" aria-pressed="${i === 0}">${["ORBIT", "MOVE BALLOON", "SCALE BALLOON", "SCALE 1D", "CURVE POINTS", "MOVE CURVE"][i]}</button>`,
+        `<button data-ve-tool="${key}" aria-pressed="${i === 0}">${["ORBIT", "MOVE BALLOON", "SCALE BALLOON", "SCALE 1D", "ROTATE BALLOON", "CURVE POINTS", "MOVE CURVE"][i]}</button>`,
     )
     .join("");
-  pane.querySelector(".voro-steps").after(tools);
+  const axisTools = document.createElement("div");
+  axisTools.setAttribute("aria-label", "Scale 1D direction");
+  axisTools.innerHTML =
+    '<button type="button" data-axis="0">X</button><button type="button" data-axis="1">Y</button><button type="button" data-axis="2">Z (VERTICAL)</button>';
+  pane.querySelector(".voro-steps").after(tools, axisTools);
   const operations = document.createElement("div");
   operations.className = "balloon-actions";
   operations.setAttribute("aria-label", "Voronoi balloon operations");
   operations.innerHTML =
-    '<button id="ve_pop" class="pop-button">Pop!</button><button id="ve_freeze" aria-pressed="false">Freeze</button><label>Pop pressure <output id="ve_popPressureValue">25%</output><input id="ve_popPressure" type="range" min="0" max="100" value="25" aria-label="Voronoi pop pressure"></label><button id="ve_restorePopped">RESTORE POPPED</button><button id="ve_undoOperation">UNDO OPERATION</button><span id="ve_operationState" class="note"></span>';
-  tools.after(operations);
+    '<button id="ve_pop" class="pop-button">Pop!</button><button id="ve_freeze" aria-pressed="false">Freeze</button><label>Pop pressure <output id="ve_popPressureValue">25%</output><input id="ve_popPressure" type="range" min="0" max="100" value="25" aria-label="Voronoi pop pressure"></label><button id="ve_unclipEdge" aria-pressed="false">UNCLIP FLOORPLATE EDGE</button><button id="ve_unclipBottom" aria-pressed="false">UNCLIP FLOORPLATE BOTTOM</button><button id="ve_restorePopped">RESTORE POPPED</button><button id="ve_undoOperation">UNDO OPERATION</button><span id="ve_operationState" class="note"></span>';
+
+  const rotationControls = document.createElement("div");
+  rotationControls.className = "scale1d-controls";
+  rotationControls.innerHTML =
+    '<label for="ve_rotateAxis">Rotation axis</label><select id="ve_rotateAxis"><option value="0">X</option><option value="1">Y</option><option value="2" selected>Z (vertical)</option></select><label for="ve_rotateDegrees">Degrees</label><input id="ve_rotateDegrees" type="number" step="any" value="0"><button id="ve_rotateBalloon">ROTATE SELECTED</button><button id="ve_resetRotation">RESET ROTATION</button>';
+  const dock = document.createElement("section");
+  dock.className = "voronoi-operation-dock";
+  dock.setAttribute("aria-label", "Balloon editing controls");
+  pane.querySelector("#vPlan").closest(".panel").before(dock);
+  dock.append(tools, axisTools, rotationControls, operations);
+  pane.classList.add("voronoi-uppercase");
+  const degreeEntry = document.createElement("input");
+  degreeEntry.type = "number";
+  degreeEntry.step = "any";
+  degreeEntry.className = "section-degree-entry";
+  degreeEntry.hidden = true;
+  pane.append(degreeEntry);
+  let rotatePress, rotateRelease, degreeAxis;
   let frozen = {},
+    unclippedEdges = [],
+    unclippedBottoms = [],
+    rotations = {},
     popped = [],
     popEvents = [],
     popPressure = 0.25,
@@ -66,9 +98,20 @@ export function createVoronoiEditing({
       popped,
       popEvents,
       popPressure,
+      unclippedEdges: [...unclippedEdges],
+      unclippedBottoms: [...unclippedBottoms],
+      rotations: structuredClone(rotations),
     });
     operationHistory.push(
-      structuredClone({ frozen, popped, popEvents, popPressure }),
+      structuredClone({
+        frozen,
+        popped,
+        popEvents,
+        popPressure,
+        unclippedEdges,
+        unclippedBottoms,
+        rotations,
+      }),
     );
     if (operationHistory.length > 20) operationHistory.shift();
   };
@@ -134,6 +177,9 @@ export function createVoronoiEditing({
       popped: [...new Set(popped)],
       popEvents: structuredClone(popEvents),
       popPressure,
+      unclippedEdges: [...unclippedEdges],
+      unclippedBottoms: [...unclippedBottoms],
+      rotations: structuredClone(rotations),
       curves: curves.map(sample),
       pressureEnabled: $("pressureEnabled").checked,
       strength: Number($("strength").value),
@@ -148,6 +194,18 @@ export function createVoronoiEditing({
     }
   }
   function paint() {
+    rotationControls.hidden = tool !== "rotate";
+    rotationControls.classList.toggle(
+      "scale1d-controls",
+      !rotationControls.hidden,
+    );
+    axisTools.hidden = tool !== "scale1d";
+    axisTools.classList.toggle("canvas-tools", !axisTools.hidden);
+    for (const button of axisTools.children)
+      button.setAttribute(
+        "aria-pressed",
+        button.dataset.axis === $("scale1dAxis").value,
+      );
     for (const b of tools.children)
       b.setAttribute("aria-pressed", b.dataset.veTool === tool);
     ensure();
@@ -252,6 +310,22 @@ export function createVoronoiEditing({
     $("freeze").disabled = busy || selectedId === null;
     $("freeze").textContent = isFrozen() ? "Unfreeze" : "Freeze";
     $("freeze").setAttribute("aria-pressed", isFrozen());
+    const uncut = unclippedEdges.includes(selectedId);
+    $("unclipEdge").disabled = busy || selectedId === null;
+    $("unclipEdge").textContent = uncut
+      ? "CLIP FLOORPLATE EDGE"
+      : "UNCLIP FLOORPLATE EDGE";
+    $("unclipEdge").setAttribute("aria-pressed", uncut);
+    const openBottom = unclippedBottoms.includes(selectedId);
+    $("unclipBottom").disabled = busy || selectedId === null;
+    $("unclipBottom").textContent = openBottom
+      ? "CLIP FLOORPLATE BOTTOM"
+      : "UNCLIP FLOORPLATE BOTTOM";
+    $("unclipBottom").setAttribute("aria-pressed", openBottom);
+    const rotationDisabled = busy || selectedId === null || isFrozen();
+    for (const id of ["rotateAxis", "rotateDegrees", "rotateBalloon"])
+      $(id).disabled = rotationDisabled;
+    $("resetRotation").disabled = rotationDisabled || !rotations[selectedId];
     $("restorePopped").disabled = busy || !popped.length;
     $("undoOperation").disabled = busy || !operationHistory.length;
     $("popPressure").disabled = busy;
@@ -308,7 +382,7 @@ export function createVoronoiEditing({
     tool = next;
     for (const b of tools.children)
       b.setAttribute("aria-pressed", b.dataset.veTool === tool);
-    if (["move", "scale", "scale1d"].includes(tool)) showBalloons();
+    if (["move", "scale", "scale1d", "rotate"].includes(tool)) showBalloons();
     paint();
   }
   tools
@@ -336,8 +410,34 @@ export function createVoronoiEditing({
     orbit.enabled = false;
     drawn = false;
   }
+  function gumballRotation() {
+    const axis = ["X", "Y", "Z"].indexOf(transform.axis);
+    if (axis < 0 || !baseline) return new T.Quaternion();
+    const radius =
+      result()?.spheres.find((s) => s.id === baseline.id)?.radius ?? 1;
+    const distance =
+      proxy.position.getComponent(axis) - baseline.anchor.getComponent(axis);
+    const direction = new T.Vector3().setComponent(axis, 1);
+    return new T.Quaternion().setFromAxisAngle(direction, distance / radius);
+  }
   function preview() {
     if (!baseline) return;
+    if (baseline.tool === "rotate") {
+      const mesh = meshes.find((o) => o.userData.balloonId === baseline.id);
+      if (!mesh || !baseline.meshMatrix) return;
+      mesh.matrixAutoUpdate = false;
+      mesh.matrix
+        .makeTranslation(...baseline.anchor.toArray())
+        .multiply(new T.Matrix4().makeRotationFromQuaternion(gumballRotation()))
+        .multiply(
+          new T.Matrix4().makeTranslation(
+            ...baseline.anchor.clone().negate().toArray(),
+          ),
+        )
+        .multiply(baseline.meshMatrix);
+      mesh.matrixWorldNeedsUpdate = true;
+      return;
+    }
     const delta = proxy.position.clone().sub(baseline.anchor).toArray();
     drawn = true;
     if (baseline.type === "curve") {
@@ -416,7 +516,70 @@ export function createVoronoiEditing({
   }
   transform.addEventListener("mouseDown", begin);
   transform.addEventListener("objectChange", preview);
-  transform.addEventListener("mouseUp", finish);
+  const canvas = renderers[0].domElement;
+  canvas.addEventListener(
+    "pointerdown",
+    (event) => {
+      rotatePress = tool === "rotate" && event.button === 0 ? event : null;
+      rotateRelease = null;
+    },
+    true,
+  );
+  canvas.addEventListener(
+    "pointerup",
+    (event) => {
+      if (rotatePress?.pointerId === event.pointerId) rotateRelease = event;
+    },
+    true,
+  );
+  transform.addEventListener("mouseUp", () => {
+    if (baseline?.tool !== "rotate") return finish();
+    const axis = ["X", "Y", "Z"].indexOf(transform.axis);
+    const click =
+      rotatePress &&
+      rotateRelease &&
+      Math.hypot(
+        rotateRelease.clientX - rotatePress.clientX,
+        rotateRelease.clientY - rotatePress.clientY,
+      ) <= 4;
+    const turn = gumballRotation();
+    proxy.position.copy(baseline.anchor);
+    proxy.updateMatrixWorld();
+    const mesh = meshes.find((o) => o.userData.balloonId === baseline.id);
+    if (mesh && baseline.meshMatrix) {
+      mesh.matrix.copy(baseline.meshMatrix);
+      mesh.matrixWorldNeedsUpdate = true;
+    }
+    finish();
+    proxy.quaternion.identity();
+    if (click && axis >= 0) {
+      degreeAxis = axis;
+      degreeEntry.value = "";
+      degreeEntry.placeholder = `${transform.axis} DEGREES`;
+      degreeEntry.setAttribute(
+        "aria-label",
+        `Rotate balloon about ${transform.axis} in degrees`,
+      );
+      degreeEntry.style.left = `${Math.max(4, Math.min(rotateRelease.clientX + 10, innerWidth - 120))}px`;
+      degreeEntry.style.top = `${Math.max(4, Math.min(rotateRelease.clientY + 6, innerHeight - 42))}px`;
+      degreeEntry.hidden = false;
+      degreeEntry.focus({ preventScroll: true });
+    } else if (!click && turn.angleTo(new T.Quaternion()) > 1e-6) {
+      applyRotation(turn);
+    }
+  });
+  degreeEntry.onblur = () => {
+    degreeEntry.hidden = true;
+  };
+  degreeEntry.onkeydown = (event) => {
+    event.stopPropagation();
+    if (event.key === "Escape") degreeEntry.blur();
+    if (event.key === "Enter" && Number.isFinite(degreeEntry.valueAsNumber)) {
+      event.preventDefault();
+      rotateDegrees(degreeAxis, degreeEntry.valueAsNumber);
+      degreeEntry.blur();
+    }
+  };
   function setRay(e, i) {
     const rect = renderers[i].domElement.getBoundingClientRect();
     pointer.set(
@@ -426,6 +589,31 @@ export function createVoronoiEditing({
     ray.setFromCamera(pointer, i ? plan : camera);
   }
   renderers.forEach((r, i) => {
+    let orbitClick;
+    r.domElement.addEventListener("pointerdown", (e) => {
+      orbitClick =
+        e.button === 0 && tool === "orbit" && !busy && !e.shiftKey
+          ? [e.pointerId, e.clientX, e.clientY]
+          : null;
+    });
+    r.domElement.addEventListener("pointerup", (e) => {
+      const start = orbitClick;
+      orbitClick = null;
+      if (
+        !start ||
+        start[0] !== e.pointerId ||
+        tool !== "orbit" ||
+        busy ||
+        Math.hypot(e.clientX - start[1], e.clientY - start[2]) > 4
+      )
+        return;
+      setRay(e, i);
+      const hit = ray.intersectObjects(meshes, false)[0];
+      if (!hit) return;
+      selectedId = hit.object.userData.balloonId;
+      ui();
+      paint();
+    });
     r.domElement.addEventListener(
       "pointerdown",
       (e) => {
@@ -451,11 +639,12 @@ export function createVoronoiEditing({
             hit = ray.intersectObjects(meshes, false)[0];
             if (!hit) return;
             selectedId = hit.object.userData.balloonId;
-            if (!["scale", "scale1d"].includes(tool)) tool = "move";
+            if (!["scale", "scale1d", "rotate"].includes(tool)) tool = "move";
           }
         }
         ui();
         paint();
+        if (tool === "rotate") return;
         begin();
         if (!baseline) return;
         const normal = i
@@ -591,8 +780,14 @@ export function createVoronoiEditing({
   };
   $("scale1dAxis").onchange = () => {
     ui();
-    attach();
+    paint();
   };
+  for (const button of axisTools.children)
+    button.onclick = () => {
+      if (busy || drag || transform.dragging) return;
+      $("scale1dAxis").value = button.dataset.axis;
+      $("scale1dAxis").onchange();
+    };
   $("applyScale1d").onclick = () => {
     if (selectedId === null || busy || isFrozen()) return;
     try {
@@ -623,6 +818,52 @@ export function createVoronoiEditing({
     delete edits[selectedId];
     commit();
   };
+  $("unclipEdge").onclick = () => {
+    if (busy || selectedId === null) return;
+    recordOperation();
+    unclippedEdges = unclippedEdges.includes(selectedId)
+      ? unclippedEdges.filter((id) => id !== selectedId)
+      : [...unclippedEdges, selectedId];
+    commit();
+  };
+  $("unclipBottom").onclick = () => {
+    if (busy || selectedId === null) return;
+    recordOperation();
+    unclippedBottoms = unclippedBottoms.includes(selectedId)
+      ? unclippedBottoms.filter((id) => id !== selectedId)
+      : [...unclippedBottoms, selectedId];
+    commit();
+  };
+  $("rotateBalloon").onclick = () =>
+    rotateDegrees(
+      Number($("rotateAxis").value),
+      $("rotateDegrees").valueAsNumber,
+    );
+  function rotateDegrees(axis, degrees) {
+    if (!Number.isFinite(degrees) || degrees % 360 === 0) return;
+    const direction = new T.Vector3().setComponent(axis, 1);
+    const turn = new T.Quaternion().setFromAxisAngle(
+      direction,
+      T.MathUtils.degToRad(degrees % 360),
+    );
+    applyRotation(turn);
+  }
+  function applyRotation(turn) {
+    if (busy || selectedId === null || isFrozen()) return;
+    const current = new T.Quaternion().fromArray(
+      rotations[selectedId] ?? [0, 0, 0, 1],
+    );
+    recordOperation();
+    rotations[selectedId] = current.premultiply(turn).normalize().toArray();
+    commit();
+  }
+  $("resetRotation").onclick = () => {
+    if (busy || selectedId === null || isFrozen() || !rotations[selectedId])
+      return;
+    recordOperation();
+    delete rotations[selectedId];
+    commit();
+  };
   $("freeze").onclick = () => {
     if (busy || selectedId === null) return;
     const balloon = result()?.spheres.find((s) => s.id === selectedId);
@@ -634,7 +875,7 @@ export function createVoronoiEditing({
         center: balloon.center,
         radius: balloon.radius,
         axisScale: balloon.axisScale ?? [1, 1, 1],
-        ...(balloon.raw ? { raw: balloon.raw } : {}),
+        ...(balloon.raw ? { raw: balloon.fullRaw ?? balloon.raw } : {}),
       });
     commit();
   };
@@ -664,7 +905,15 @@ export function createVoronoiEditing({
   };
   $("undoOperation").onclick = () => {
     if (busy || !operationHistory.length) return;
-    ({ frozen, popped, popEvents, popPressure } = operationHistory.pop());
+    ({
+      frozen,
+      popped,
+      popEvents,
+      popPressure,
+      unclippedEdges,
+      unclippedBottoms,
+      rotations,
+    } = operationHistory.pop());
     commit();
   };
   $("popPressure").oninput = () =>
@@ -731,6 +980,9 @@ export function createVoronoiEditing({
       resetCurve();
       edits = {};
       frozen = {};
+      unclippedEdges = [];
+      unclippedBottoms = [];
+      rotations = {};
       popped = [];
       popEvents = [];
       popPressure = 0.25;
@@ -751,6 +1003,9 @@ export function createVoronoiEditing({
     edits = structuredClone(nextEdits);
     frozen = structuredClone(data.frozen ?? {});
     popped = [...new Set(data.popped ?? [])];
+    unclippedEdges = [...new Set(data.unclippedEdges ?? [])];
+    unclippedBottoms = [...new Set(data.unclippedBottoms ?? [])];
+    rotations = structuredClone(data.rotations ?? {});
     popEvents = structuredClone(data.popEvents ?? []);
     popPressure = data.popPressure ?? 0.25;
     operationHistory = [];
@@ -760,9 +1015,18 @@ export function createVoronoiEditing({
       Math.min(curves[active].length - 1, Number(data.point) || 0),
     );
     selectedId = Number.isInteger(data.selectedId) ? data.selectedId : null;
-    tool = ["orbit", "move", "scale", "scale1d", "curve", "curveMove"].includes(
-      data.tool,
-    )
+    $("scale1dAxis").value = [0, 1, 2].includes(data.scaleAxis)
+      ? data.scaleAxis
+      : 0;
+    tool = [
+      "orbit",
+      "move",
+      "scale",
+      "scale1d",
+      "rotate",
+      "curve",
+      "curveMove",
+    ].includes(data.tool)
       ? data.tool
       : "orbit";
     for (const id of ["strength", "influence"])
@@ -782,7 +1046,15 @@ export function createVoronoiEditing({
     settings,
     rejectBuild() {
       if (pendingOperation) {
-        ({ frozen, popped, popEvents, popPressure } = pendingOperation);
+        ({
+          frozen,
+          popped,
+          popEvents,
+          popPressure,
+          unclippedEdges,
+          unclippedBottoms,
+          rotations,
+        } = pendingOperation);
         pendingOperation = null;
         operationHistory.pop();
         ui();
@@ -804,11 +1076,15 @@ export function createVoronoiEditing({
       point,
       selectedId,
       tool,
+      scaleAxis: Number($("scale1dAxis").value),
       curves: structuredClone(curves),
       frozen: structuredClone(frozen),
       popped: [...new Set(popped)],
       popEvents: structuredClone(popEvents),
       popPressure,
+      unclippedEdges: [...unclippedEdges],
+      unclippedBottoms: [...unclippedBottoms],
+      rotations: structuredClone(rotations),
       edits: structuredClone(edits),
       strength: Number($("strength").value),
       influence: Number($("influence").value),

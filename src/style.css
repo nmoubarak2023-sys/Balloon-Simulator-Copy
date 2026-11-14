@@ -1395,3 +1395,46 @@ footer {
   transform: translate(-50%, -50%);
   text-transform: none;
 }
+
+.voronoi-uppercase {
+  text-transform: uppercase;
+}
+.voronoi-uppercase :is(button, input, select, option, label, summary) {
+  text-transform: uppercase;
+}
+.voronoi-uppercase .section-degree-entry::placeholder {
+  text-transform: uppercase;
+}
+.voronoi-operation-dock {
+  max-height: max(130px, calc(100dvh - var(--floor-toolbar-height, 0px) - 16px));
+  overflow: auto;
+  scrollbar-color: #21e0ed66 #05090b;
+  background: #050909;
+  border: 1px solid #21e0ed38;
+  margin-bottom: 20px;
+}
+.voronoi-operation-dock :is(.canvas-tools, .balloon-actions) {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+}
+.voronoi-operation-dock button {
+  text-align: left;
+  color: #94c5ca;
+}
+.voronoi-operation-dock .pop-button {
+  color: #f282fc;
+}
+.voronoi-operation-dock .balloon-actions label {
+  width: auto;
+  margin: 4px 6px;
+}
+.voronoi-operation-dock .scale1d-controls {
+  padding: 6px;
+}
+
+@media (max-width: 800px) {
+  .voronoi-operation-dock {
+    max-height: 360px;
+  }
+}

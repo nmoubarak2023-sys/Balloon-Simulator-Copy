@@ -8,12 +8,12 @@ import { mountGeometryLibrary, canvasThumbnail } from "./geometry-library.js";
 import { collisionSites, columnMesh } from "./columns.js";
 import { meshQuality } from "./mesh-quality.js";
 import { isUndoShortcut } from "./history.js";
-export function initColumns(rhino, getVoronoi) {
+export function initColumns(rhino, getVoronoi, getFloors) {
   const pane = document.createElement("main");
   pane.id = "columnWorkspace";
   pane.hidden = true;
   document.querySelector("main").after(pane);
-  pane.innerHTML = `<div class="voro-layout"><section class="panel" data-frame-count="1"><div class="panel-heading"><span>PERSPECTIVE <small>01 / COLUMN POPULATE</small></span><button id="cFit">FIT ↗</button></div><div class="canvas-tools"><button id="cPick" aria-pressed="true">PICK COLLISION</button><button id="cGhost" aria-pressed="true">GHOST ENCLOSURE</button><button id="cFocus">FOCUS COLUMN</button><button id="cWire" aria-pressed="false">WIRE</button></div><div id="cPerspective" class="voro-canvas"></div><div class="viewer-footer">PINK MARKERS / COLLISION SEAMS & JUNCTIONS · CLICK TO PLACE A COLUMN</div></section><aside><section class="panel" data-frame-count="2"><div class="panel-heading">PLAN VIEW <small>02 / SUPPORT LOCATIONS</small></div><div id="cPlan" class="voro-plan"></div></section><section class="panel" data-frame-count="3"><div class="panel-heading">CONTROL PANEL <small>03 / COLUMN POPULATE</small></div><div class="voro-controls"><button id="cImport" class="primary">COPY CURRENT VORONOI ↗</button><p class="note">A separate snapshot. Pink markers locate transitions between balloon roof surfaces. Click a marker in either view to place a support, or select a collision below.</p><label>Collision location<select id="cSites"></select></label><button id="cPlace">PLACE AT SELECTED COLLISION ↗</button><label>Placed column<select id="cColumns"></select></label>${[
+  pane.innerHTML = `<div class="canvas-tools"><label>Working floor<select id="cFloor"></select></label><button id="cImport" class="primary">COPY SELECTED FLOOR ↗</button></div><div class="voro-layout"><section class="panel" data-frame-count="1"><div class="panel-heading"><span>PERSPECTIVE <small>01 / COLUMN POPULATE</small></span><button id="cFit">FIT ↗</button></div><div class="canvas-tools"><button id="cPick" aria-pressed="true">PICK COLLISION</button><button id="cGhost" aria-pressed="true">GHOST ENCLOSURE</button><button id="cFocus">FOCUS COLUMN</button><button id="cWire" aria-pressed="false">WIRE</button></div><div id="cPerspective" class="voro-canvas"></div><div class="viewer-footer">PINK MARKERS / COLLISION SEAMS & JUNCTIONS · CLICK TO PLACE A COLUMN</div></section><aside><section class="panel" data-frame-count="2"><div class="panel-heading">PLAN VIEW <small>02 / SUPPORT LOCATIONS</small></div><div id="cPlan" class="voro-plan"></div></section><section class="panel" data-frame-count="3"><div class="panel-heading">CONTROL PANEL <small>03 / COLUMN POPULATE</small></div><div class="voro-controls"><p class="note">A separate snapshot. Pink markers locate transitions between balloon roof surfaces. Click a marker in either view to place a support, or select a collision below.</p><label>Collision location<select id="cSites"></select></label><button id="cPlace">PLACE AT SELECTED COLLISION ↗</button><label>Placed column<select id="cColumns"></select></label>${[
     ["Bottom", "Bottom radius (ft)", 1, 0.1, 20, 0.1],
     ["Flare", "Top radius (ft)", 5, 0.1, 30, 0.1],
     ["Blend", "Canopy blend (%)", 55, 10, 90, 1],
@@ -24,7 +24,7 @@ export function initColumns(rhino, getVoronoi) {
     )
     .join(
       "",
-    )}<button id="cApply">APPLY TO SELECTED COLUMN ↗</button><div class="pair"><button id="cRemove">REMOVE COLUMN</button><button id="cUndo">UNDO / CTRL+Z</button></div><label class="check"><input id="cRoofExport" type="checkbox" checked> Include enclosure in export</label><div class="pair"><button id="cObj">EXPORT .OBJ</button><button id="c3dm">EXPORT .3DM</button></div><button id="cSave">SAVE COLUMN PROJECT</button><label class="button" for="cLoad">OPEN COLUMN PROJECT</label><input id="cLoad" type="file" accept=".json" hidden><p class="note">A trumpet profile rises vertically at the base and curves outward to meet the canopy tangentially. Canopy blend adjusts the full curve. Columns and enclosure export as separate closed shells, preserving the original enclosure.</p><pre id="cReport" class="iteration-report">Copy a Voronoi enclosure to begin.</pre></div></section></aside></div><div class="status-bar" id="cStatus" role="status">Generate in Voronoi Balloons, then copy it here.</div>`;
+    )}<button id="cApply">APPLY TO SELECTED COLUMN ↗</button><div class="pair"><button id="cRemove">REMOVE COLUMN</button><button id="cUndo">UNDO / CTRL+Z</button></div><label class="check"><input id="cRoofExport" type="checkbox" checked> Include hollow enclosure and floor plate</label><label>Shell thickness (ft)<input id="cShellThickness" type="number" value="1" min="0.1" step="any" required></label><div class="pair"><button id="cObj">EXPORT .OBJ</button><button id="c3dm">EXPORT .3DM</button></div><button id="cSave">SAVE COLUMN PROJECT</button><label class="button" for="cLoad">OPEN COLUMN PROJECT</label><input id="cLoad" type="file" accept=".json" hidden><p class="note">A trumpet profile rises vertically at the base and curves outward to meet the canopy tangentially. Canopy blend adjusts the full curve. The hollow enclosure and interior columns export as separate objects.</p><pre id="cReport" class="iteration-report">Copy a Voronoi enclosure to begin.</pre></div></section></aside></div><div class="status-bar" id="cStatus" role="status">Generate in Voronoi Balloons, then copy it here.</div>`;
   const $ = (id) => pane.querySelector("#" + id),
     status = (s) => {
       $("cStatus").textContent = s;
@@ -37,6 +37,8 @@ export function initColumns(rhino, getVoronoi) {
     wire = false,
     pick = true,
     history = [];
+  const floorWork = new Map();
+  let workingFloor;
   const scene = new T.Scene(),
     root = new T.Group(),
     markers = new T.Group();
@@ -288,7 +290,55 @@ export function initColumns(rhino, getVoronoi) {
       `${sites.length} collision locations found. Click a pink marker to place a column.`,
     );
   }
-  $("cImport").onclick = guarded(() => accept(getVoronoi()));
+  function selectFloor(index) {
+    if (workingFloor !== undefined && source)
+      floorWork.set(workingFloor, {
+        source,
+        sites,
+        columns,
+        selected,
+        history,
+      });
+    workingFloor = index;
+    const saved = floorWork.get(index);
+    source = saved?.source;
+    sites = saved?.sites ?? [];
+    columns = saved?.columns ?? [];
+    selected = saved?.selected ?? -1;
+    history = saved?.history ?? [];
+    $("cSites").replaceChildren(
+      ...sites.map(
+        (site) =>
+          new Option(
+            site.id +
+              1 +
+              ". " +
+              site.kind +
+              " · X " +
+              site.x.toFixed(2) +
+              ", Y " +
+              site.y.toFixed(2),
+            site.id,
+          ),
+      ),
+    );
+    if (source) {
+      syncSettings();
+      display();
+      fit();
+      status(
+        "Floor " + (index + 1) + " · " + columns.length + " placed column(s).",
+      );
+      return;
+    }
+    $("cColumns").replaceChildren();
+    $("cUndo").disabled = true;
+    $("cReport").textContent = "Copy a Voronoi enclosure to begin.";
+    display();
+    accept(getVoronoi(index));
+  }
+  $("cFloor").onchange = guarded(() => selectFloor(Number($("cFloor").value)));
+  $("cImport").onclick = guarded(() => accept(getVoronoi(workingFloor)));
   $("cPlace").onclick = guarded(() => {
     const site = sites[Number($("cSites").value)];
     if (!site)
@@ -473,34 +523,76 @@ export function initColumns(rhino, getVoronoi) {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  const exported = () => {
+  let cancelShell;
+  window.addEventListener("keydown", (event) => {
+    if (pane.hidden || event.key !== "Escape" || !cancelShell) return;
+    event.preventDefault();
+    cancelShell();
+  });
+  const exported = async () => {
+    if (cancelShell) throw Error("A shell export is already running.");
     if (!source) throw Error("Copy an enclosure first.");
-    if (!columns.length) throw Error("Place at least one column first.");
+    const includeShell = $("cRoofExport").checked;
+    if (!includeShell && !columns.length)
+      throw Error("Place at least one column first.");
+    const columnItems = columns.map((column, i) => ({
+      name: "Column " + (i + 1),
+      raw: column.raw,
+    }));
+    let shell;
+    if (includeShell) {
+      const thickness = $("cShellThickness");
+      if (!thickness.reportValidity())
+        throw Error("Enter a valid shell thickness.");
+      status("Building the hollow enclosure and floor plate…");
+      const worker = new Worker(
+        new URL("./column-shell-worker.js", import.meta.url),
+        { type: "module" },
+      );
+      try {
+        shell = await new Promise((resolve, reject) => {
+          cancelShell = () => reject(Error("Shell export cancelled."));
+          worker.onmessage = ({ data }) =>
+            data.error ? reject(Error(data.error)) : resolve(data.raw);
+          worker.onerror = (event) =>
+            reject(Error(event.message || "Shell export failed."));
+          worker.postMessage({
+            raw: source.raw,
+            thickness: thickness.valueAsNumber,
+          });
+        });
+      } finally {
+        cancelShell = undefined;
+        worker.terminate();
+      }
+    }
     return [
-      ...($("cRoofExport").checked
-        ? [{ name: "Voronoi enclosure", raw: source.raw }]
+      ...(shell
+        ? [{ name: "Hollow balloon enclosure and floor plate", raw: shell }]
         : []),
-      ...columns.map((c, i) => ({ name: `Column ${i + 1}`, raw: c.raw })),
+      ...columnItems,
     ];
   };
-  $("cObj").onclick = guarded(() => {
+  $("cObj").onclick = guarded(async () => {
     let offset = 1,
       text = "";
-    for (const item of exported()) {
+    for (const item of await exported()) {
       const out = quadObj(item.raw, item.name.replaceAll(" ", "_"), offset);
       text += out.text;
       offset += out.vertices;
     }
     download(text, "column-populate.obj");
+    status("OBJ exported.");
   });
   $("c3dm").onclick = guarded(async () => {
-    const items = exported(),
+    const items = await exported(),
       r = await rhino(),
       doc = new r.File3dm();
     try {
       doc.settings().modelUnitSystem = r.UnitSystem.Feet;
       for (const item of items) addRhinoQuadMesh(r, doc, item.raw, item.name);
       download(doc.toByteArray(), "column-populate.3dm");
+      status("Rhino assembly exported.");
     } finally {
       doc.delete();
     }
@@ -546,12 +638,29 @@ export function initColumns(rhino, getVoronoi) {
     accept,
     show() {
       resize();
-      if (!source) {
+      const { floors, active } = getFloors();
+      const chosen =
+        floors.find((floor) => floor.index === workingFloor) ??
+        floors.find((floor) => floor.index === active) ??
+        floors[0];
+      $("cFloor").replaceChildren(
+        ...floors.map((floor) => new Option(floor.name, floor.index)),
+      );
+      $("cFloor").disabled = !chosen;
+      $("cImport").disabled = !chosen;
+      if (!chosen) return;
+      $("cFloor").value = chosen.index;
+      if (
+        !source ||
+        (workingFloor !== undefined && workingFloor !== chosen.index)
+      ) {
         try {
-          accept(getVoronoi());
-        } catch (e) {
-          status(e.message);
+          selectFloor(chosen.index);
+        } catch (error) {
+          status(error.message);
         }
+      } else {
+        workingFloor = chosen.index;
       }
     },
   };

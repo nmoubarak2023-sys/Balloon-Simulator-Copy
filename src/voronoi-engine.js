@@ -36,6 +36,11 @@ export function voronoiBuild(m, p) {
             "domain",
             "unclippedBalloons",
             "clipFloor",
+            "clipFloorEdge",
+            "floorPerimeter",
+            "unclippedEdges",
+            "unclippedBottoms",
+            "rotations",
           ].includes(k),
       )
       .every(([, v]) => Number.isFinite(v)) ||
@@ -266,9 +271,41 @@ export function voronoiBuild(m, p) {
             ]),
           )
         : null;
+    const perimeter = p.floorPerimeter ?? [
+      [0, 0],
+      [w, 0],
+      [w, h],
+      [0, h],
+    ];
+    const perimeterSegments = p.clipFloorEdge
+      ? perimeter
+          .map(([x, y], i) => {
+            const [nx, ny] = perimeter[(i + 1) % perimeter.length];
+            const dx = nx - x,
+              dy = ny - y;
+            return { x, y, dx, dy, len2: dx * dx + dy * dy };
+          })
+          .filter((edge) => edge.len2 > 0)
+      : [];
+    const floorPrism = p.clipFloorEdge
+      ? own(
+          own(
+            own(
+              p.floorPerimeter
+                ? new m.CrossSection([p.floorPerimeter], "EvenOdd")
+                : m.CrossSection.square([w, h]),
+            ).extrude(prismHeight * 2),
+          ).translate([0, 0, floor - prismHeight]),
+        )
+      : null;
+    const uncut = new Set(p.unclippedEdges);
+    const openBottom = new Set(p.unclippedBottoms);
     const pressure = !!p.pressureEnabled && p.strength > 0 && p.curves?.length;
     const surfaces =
       p.unclippedBalloons ||
+      floorPrism ||
+      Object.keys(p.rotations ?? {}).length ||
+      openBottom.size ||
       domainLoops ||
       pressure ||
       (p.popEvents?.length && p.popPressure > 0) ||
@@ -332,6 +369,22 @@ export function voronoiBuild(m, p) {
                   ),
                 ).translate(s.center),
               );
+            const rotation = p.rotations?.[s.id];
+            if (!savedRaw && rotation) {
+              const quaternion = new T.Quaternion().fromArray(rotation);
+              const center = new T.Vector3(...s.center);
+              const vertex = new T.Vector3();
+              solid = own(
+                solid.warp((v) => {
+                  vertex
+                    .fromArray(v)
+                    .sub(center)
+                    .applyQuaternion(quaternion)
+                    .add(center);
+                  vertex.toArray(v);
+                }),
+              );
+            }
             if (prism && !savedRaw) solid = own(solid.intersect(prism));
             if (solid.isEmpty())
               throw Error(
@@ -340,7 +393,63 @@ export function voronoiBuild(m, p) {
             s.analyticSurface = s.frozen
               ? !!s.analyticSurface
               : !pressure && !(p.popEvents?.length && p.popPressure > 0);
-            if (p.clipFloor) solid = own(solid.trimByPlane([0, 0, 1], floor));
+            if (rotation) s.analyticSurface = false;
+            const full = solid;
+            if (p.clipFloor && !openBottom.has(s.id))
+              solid = own(solid.trimByPlane([0, 0, 1], floor));
+            if (floorPrism && !uncut.has(s.id)) {
+              const beforeEdge = solid;
+              solid = own(solid.intersect(floorPrism));
+              if (solid.isEmpty() && !beforeEdge.isEmpty())
+                throw Error(
+                  `Balloon ${s.id + 1} is outside the floorplate. Unclip it before moving it past the edge.`,
+                );
+              if (solid.volume() < beforeEdge.volume() * (1 - 1e-8)) {
+                // Keep the edge blend local so most of the original lobe
+                // retains its curvature, including the shoulder near the rim.
+                const bounds = solid.boundingBox();
+                const width =
+                  s.radius * Math.min(...s.axisScale.slice(0, 2)) * 0.42;
+                const blendHeight = (bounds.max[2] - floor) * 0.65;
+                if (width > 0 && blendHeight > 0) {
+                  const refined = own(solid.refineToLength(width / 5));
+                  solid = own(
+                    refined.warp((v) => {
+                      const height = v[2] - floor;
+                      if (height <= 0) return;
+                      let d2 = width * width;
+                      for (const { x, y, dx, dy, len2 } of perimeterSegments) {
+                        const u = v[0] - x,
+                          t = v[1] - y;
+                        const a = Math.max(
+                          0,
+                          Math.min(1, (u * dx + t * dy) / len2),
+                        );
+                        d2 = Math.min(
+                          d2,
+                          (u - a * dx) ** 2 + (t - a * dy) ** 2,
+                        );
+                      }
+                      const u = Math.sqrt(d2) / width;
+                      const t = Math.min(1, height / blendHeight);
+                      const shoulder = t * t * (3 - 2 * t);
+                      const blend = Math.min(1, u / (1 - 0.4 * shoulder));
+                      const ease = blend ** 2 * (6 + blend * (-8 + 3 * blend));
+                      v[2] = floor + height * (0.035 + 0.965 * ease);
+                    }),
+                  );
+                  solid = own(solid.simplify(width * 0.0002));
+                  s.analyticSurface = false;
+                }
+              }
+            }
+            if (solid !== full) {
+              const untrimmed = full.getMesh();
+              s.fullRaw = {
+                positions: new Float32Array(untrimmed.vertProperties),
+                indices: new Uint32Array(untrimmed.triVerts),
+              };
+            }
             const mesh = solid.getMesh(),
               g = new T.BufferGeometry();
             g.setAttribute(
@@ -356,7 +465,7 @@ export function voronoiBuild(m, p) {
               positions: new Float32Array(mesh.vertProperties),
               indices: new Uint32Array(mesh.triVerts),
             };
-            s.raw = savedRaw && !p.clipFloor ? structuredClone(savedRaw) : raw;
+            s.raw = raw;
             return {
               solid,
               bvh,

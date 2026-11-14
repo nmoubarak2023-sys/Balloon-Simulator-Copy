@@ -78,16 +78,20 @@ test("Voronoi axis scaling updates only the chosen balloon dimension and retains
   };
   const base = voronoiBuild(m, { ...p, ...pressure }),
     id = base.ids[0];
-  const scaled = voronoiBuild(m, {
-    ...p,
-    ...pressure,
-    edits: { [id]: [0, 0, 0, 1, 1.4, 1, 1] },
-  });
-  const a = bounds(base.spheres[0].raw),
-    b = bounds(scaled.spheres[0].raw);
-  assert.ok(Math.abs(b.span[0] - a.span[0] * 1.4) < 1e-4);
-  assert.ok(Math.abs(b.span[1] - a.span[1]) < 1e-5);
-  assert.ok(Math.abs(b.span[2] - a.span[2]) < 1e-5);
-  assert.equal(scaled.closed, true);
-  assert.deepEqual(scaled.ids, base.ids);
+  const original = bounds(base.spheres[0].raw);
+  for (const axis of [0, 2]) {
+    const scaled = voronoiBuild(m, {
+      ...p,
+      ...pressure,
+      edits: { [id]: scaleAxisEdit([0, 0, 0, 1], axis, 1.4) },
+    });
+    const changed = bounds(scaled.spheres[0].raw);
+    for (const dimension of [0, 1, 2]) {
+      const expected =
+        original.span[dimension] * (dimension === axis ? 1.4 : 1);
+      assert.ok(Math.abs(changed.span[dimension] - expected) < 1e-4);
+    }
+    assert.equal(scaled.closed, true);
+    assert.deepEqual(scaled.ids, base.ids);
+  }
 });

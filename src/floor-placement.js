@@ -57,6 +57,7 @@ export function placeSavedFloor(data, elevation) {
     for (const sphere of result.spheres ?? []) {
       point(sphere.center);
       raw(sphere.raw);
+      raw(sphere.fullRaw);
     }
   }
   return copy;

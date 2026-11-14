@@ -11,6 +11,34 @@ export function validateVoronoiLifecycle(p) {
   )
     throw Error("Invalid popped balloon state.");
   if (
+    p.unclippedEdges !== undefined &&
+    (!Array.isArray(p.unclippedEdges) ||
+      p.unclippedEdges.length > 3000 ||
+      p.unclippedEdges.some((id) => !Number.isInteger(id) || !validId(id)))
+  )
+    throw Error("Invalid balloon floorplate edge overrides.");
+  const bottoms = p.unclippedBottoms ?? [];
+  if (
+    !Array.isArray(bottoms) ||
+    bottoms.length > 3000 ||
+    bottoms.some((id) => !Number.isInteger(id) || !validId(id))
+  )
+    throw Error("Invalid balloon floorplate overrides.");
+  const rotations = p.rotations ?? {};
+  if (
+    typeof rotations !== "object" ||
+    Array.isArray(rotations) ||
+    Object.entries(rotations).some(
+      ([id, q]) =>
+        !validId(id) ||
+        !Array.isArray(q) ||
+        q.length !== 4 ||
+        !q.every(Number.isFinite) ||
+        Math.abs(Math.hypot(...q) - 1) > 1e-6,
+    )
+  )
+    throw Error("Invalid balloon rotations.");
+  if (
     !frozen ||
     typeof frozen !== "object" ||
     Array.isArray(frozen) ||

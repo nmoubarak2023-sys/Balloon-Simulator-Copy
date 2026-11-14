@@ -1595,6 +1595,9 @@ const workspaces = initVoronoi(
     });
   },
   party,
+  () => {
+    if (!display && !busy)
+      task("Generating demonstration balloon field…", () => generate(true));
+  },
 );
 demo();
-task("Generating demonstration balloon field…", () => generate(true));

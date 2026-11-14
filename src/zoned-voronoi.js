@@ -66,6 +66,15 @@ export function zonedVoronoiBuild(m, p) {
           selected: p.unclippedBalloons ? cfg.count : cfg.selected,
           unclippedBalloons: !!p.unclippedBalloons,
           clipFloor: !!p.clipFloor,
+          clipFloorEdge: !!p.clipFloorEdge,
+          floorPerimeter: boundary.perimeter,
+          rotations: remap(p.rotations),
+          unclippedBottoms: (p.unclippedBottoms ?? [])
+            .filter((id) => id >= offset && id < offset + ZONE_STRIDE)
+            .map((id) => id - offset),
+          unclippedEdges: (p.unclippedEdges ?? [])
+            .filter((id) => id >= offset && id < offset + ZONE_STRIDE)
+            .map((id) => id - offset),
           width: bounds.width,
           height: bounds.height,
           floor: p.floor,
@@ -179,6 +188,11 @@ export function zonedVoronoiBuild(m, p) {
     union = m.Manifold.union(solids);
     if (union.status() !== "NoError")
       throw Error("Could not join the zone enclosures.");
+    if (p.clipFloorEdge) {
+      const cleaned = union.simplify(1e-4);
+      union.delete();
+      union = cleaned;
+    }
     const mesh = union.getMesh(),
       positions = new Float64Array(mesh.numVert * 3);
     for (let i = 0; i < mesh.numVert; i++)
