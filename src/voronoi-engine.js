@@ -465,7 +465,8 @@ export function voronoiBuild(m, p) {
               positions: new Float32Array(mesh.vertProperties),
               indices: new Uint32Array(mesh.triVerts),
             };
-            s.raw = raw;
+            s.raw =
+              savedRaw && solid === full ? structuredClone(savedRaw) : raw;
             return {
               solid,
               bvh,
