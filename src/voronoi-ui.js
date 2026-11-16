@@ -1,3 +1,5 @@
+import { initMeasure } from "./voronoi-measure.js";
+import { initRealistic } from "./realistic-ui.js";
 import { initFacade } from "./facade-ui.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
@@ -5,7 +7,7 @@ import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { UndoJournal, isUndoShortcut } from "./history.js";
 import { populateAllZones } from "./zone-population.js";
 import { placeSavedFloor } from "./floor-placement.js";
-import { loopBounds } from "./zones.js";
+import { inLoops, loopBounds } from "./zones.js";
 import { defaultZoneSettings, ZONE_STRIDE } from "./zoned-voronoi.js";
 import { readBuildingCurves } from "./rhino-zones.js";
 import { initColumns } from "./column-ui.js";
@@ -34,12 +36,15 @@ export function initVoronoi(
   nav.className = "simulation-tabs";
   nav.setAttribute("aria-label", "Simulation workspaces");
   nav.innerHTML =
-    '<button aria-pressed="true">VORONOI BALLOONS</button><button aria-pressed="false">COLUMN POPulate</button><button aria-pressed="false" aria-controls="facadeWorkspace">FACADE DESIGN</button>';
+    '<button aria-pressed="true">VORONOI BALLOONS</button><button aria-pressed="false">COLUMN POPulate</button><button aria-pressed="false" aria-controls="realisticWorkspace">REALISTIC MODE</button><button aria-pressed="false" aria-controls="facadeWorkspace">FACADE DESIGN</button>';
   existing.before(nav);
   const facade = document.createElement("main");
   facade.id = "facadeWorkspace";
   facade.hidden = true;
-  existing.after(pane, facade);
+  const realistic = document.createElement("main");
+  realistic.id = "realisticWorkspace";
+  realistic.hidden = true;
+  existing.after(pane, realistic, facade);
   const fields = [
     ["count", "Seed point count", 40, 1, 150, 1],
     ["seed", "Point seed", 42, 0, 9999, 1],
@@ -373,7 +378,7 @@ export function initVoronoi(
     pickZone = false;
   let zonePickTargets = [];
   const floorControls = document.createElement("div");
-  floorControls.innerHTML = `<label>Editing floor<select id="vFloor" title="Only this floor is editable. Other visible floors are faded and locked.">${floorState.map((f, i) => `<option value="${i}">${f.name}</option>`).join("")}</select></label><div id="vFloorVisibility"></div><label><input type="checkbox" id="vIsolateZone"> Isolate active zone</label>`;
+  floorControls.innerHTML = `<label>Editing floor<select id="vFloor" title="Only this floor is editable. Other visible floors are faded and locked.">${floorState.map((f, i) => `<option value="${i}">${f.name}</option>`).join("")}</select></label><div id="vFloorVisibility"></div><label><input type="checkbox" id="vIsolateZone"> Isolate active zone</label><label class="check"><input type="checkbox" id="vZoneLabels" checked> Zone labels</label>`;
   floorControls.className = "floor-toolbar";
   floorControls.setAttribute("aria-label", "Building floors");
   floorControls.insertAdjacentHTML(
@@ -429,6 +434,7 @@ export function initVoronoi(
     autoBuild = true,
     keepStage = false,
     exactStage = false,
+    preserveView = false,
   ) {
     resetStepMenu = !!snapshot.resetStepMenu;
     const params = snapshot.params;
@@ -446,7 +452,7 @@ export function initVoronoi(
         : (snapshot.stage ?? 0);
     wire = !!snapshot.wire;
     ghosted = !!snapshot.ghosted;
-    fitNext = true;
+    fitNext = !preserveView;
     draw();
     if (autoBuild && !result && !pending)
       generate(keepStage && boundary ? "preview" : "prepare");
@@ -1050,9 +1056,102 @@ export function initVoronoi(
       sectionCuts.add(lines);
     });
   }
+  const zoneLabels = renderers.map((renderer) => {
+    const layer = document.createElement("div");
+    layer.className = "zone-label-layer";
+    renderer.domElement.parentElement.append(layer);
+    return layer;
+  });
+  const zoneAnnotations = [];
+  const projectedZoneLabel = new T.Vector3();
+  const labelX = new T.Vector3();
+  const labelY = new T.Vector3();
+  $("vZoneLabels").onchange = () => {
+    for (const layer of zoneLabels) layer.hidden = !$("vZoneLabels").checked;
+  };
+  let hoveredZone;
+  function highlightZone(hit) {
+    if (hoveredZone) hoveredZone.base.visible = false;
+    hoveredZone =
+      hit?.annotation?.floor === activeFloor ? hit.annotation : undefined;
+    if (hoveredZone) hoveredZone.base.visible = true;
+  }
+  function renameZone(annotation, name) {
+    if (pending || backgroundTasks || !name) return;
+    const { floor, zone } = annotation;
+    if (floor !== activeFloor) return;
+    const live = floor === activeFloor;
+    const snapshot = floorState[floor].snapshot;
+    const outline = live ? boundary : snapshot?.params?.boundary;
+    if (!outline?.zones[zone] || outline.zones[zone].name === name) return;
+    remember(captureUndo());
+    const zones = outline.zones.map((item, i) =>
+      i === zone ? { ...item, name } : item,
+    );
+    const renamed = { ...outline, zones };
+    const updateResult = (old) =>
+      old && {
+        ...old,
+        params: { ...old.params, boundary: renamed },
+        zones: old.zones?.map((item, i) =>
+          i === zone ? { ...item, name } : item,
+        ),
+      };
+    if (live) {
+      boundary = renamed;
+      result = updateResult(result);
+      zoneUI(false);
+      stashFloor();
+    } else {
+      floorState[floor].snapshot = {
+        ...snapshot,
+        params: { ...snapshot.params, boundary: renamed },
+        result: updateResult(snapshot.result),
+      };
+    }
+    draw();
+  }
+  function zoneLabel(annotation, name, layer) {
+    const element = document.createElement("div");
+    element.className = "zone-canvas-label";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = name;
+    button.setAttribute("aria-label", "Rename " + name);
+    button.disabled = annotation.floor !== activeFloor;
+    button.onclick = () => {
+      if (pending || backgroundTasks) return;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.maxLength = 100;
+      input.value = name;
+      input.setAttribute("aria-label", "Zone name");
+      input.onblur = () => input.replaceWith(button);
+      input.onkeydown = (event) => {
+        event.stopPropagation();
+        if (event.key === "Escape") input.blur();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          renameZone(annotation, input.value.trim());
+          input.blur();
+        }
+      };
+      button.replaceWith(input);
+      input.select();
+    };
+    element.onpointerenter = () => highlightZone({ annotation });
+    element.onpointerleave = () => highlightZone(null);
+    element.append(button);
+    layer.append(element);
+    return element;
+  }
   function draw() {
+    highlightZone(null);
+    zoneAnnotations.length = 0;
+    for (const layer of zoneLabels) layer.replaceChildren();
     sectionCutsDirty = true;
     for (const o of zonePickTargets) {
+      o.removeFromParent();
       o.geometry.dispose();
       o.material.dispose();
     }
@@ -1094,15 +1193,83 @@ export function initVoronoi(
           );
         const base = new T.ShapeGeometry(shape);
         base.translate(0, 0, source.params.boundary.elevation ?? 0);
+        const positions = base.getAttribute("position");
+        const indices = base.index;
+        if (!indices?.count) {
+          base.dispose();
+          return;
+        }
+        const a = new T.Vector3(),
+          b = new T.Vector3(),
+          c = new T.Vector3();
+        const anchor = new T.Vector3();
+        const centroid = new T.Vector3();
+        const triangle = new T.Triangle(a, b, c);
+        let areaSum = 0,
+          largest = -1;
+        for (let i = 0; i < indices.count; i += 3) {
+          a.fromBufferAttribute(positions, indices.getX(i));
+          b.fromBufferAttribute(positions, indices.getX(i + 1));
+          c.fromBufferAttribute(positions, indices.getX(i + 2));
+          const area = triangle.getArea();
+          const midpoint = triangle.getMidpoint(new T.Vector3());
+          centroid.addScaledVector(midpoint, area);
+          areaSum += area;
+          if (area > largest) {
+            largest = area;
+            anchor.copy(midpoint);
+          }
+        }
+        if (areaSum) {
+          centroid.divideScalar(areaSum);
+          if (inLoops([centroid.x, centroid.y], z.loops)) anchor.copy(centroid);
+        }
+        const labelDirection = new T.Vector3(1, 0, 0);
+        let longestEdge = 0;
+        const outline = z.loops[0];
+        for (let i = 0; i < outline.length; i++) {
+          const from = outline[i];
+          const to = outline[(i + 1) % outline.length];
+          const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
+          if (length <= longestEdge) continue;
+          longestEdge = length;
+          const dx = to[0] - from[0];
+          const dy = to[1] - from[1];
+          const sign = dx < 0 || (dx === 0 && dy < 0) ? -1 : 1;
+          labelDirection.set((sign * dx) / length, (sign * dy) / length, 0);
+        }
+        const annotation = {
+          floor: source.floor,
+          zone,
+          anchor,
+          labelDirection,
+        };
+        annotation.labels = zoneLabels.map((layer) =>
+          zoneLabel(annotation, z.name, layer),
+        );
+        zoneAnnotations.push(annotation);
         const targets = [base];
         const raw = source.result?.zones?.[zone]?.raw;
         if (raw?.indices.length) targets.push(geometry(raw));
         for (const g of targets) {
           const proxy = new T.Mesh(
             g,
-            new T.MeshBasicMaterial({ side: T.DoubleSide }),
+            new T.MeshBasicMaterial({
+              side: T.DoubleSide,
+              color: 0x69cfff,
+              transparent: true,
+              opacity: 0.16,
+              depthWrite: false,
+              polygonOffset: true,
+              polygonOffsetFactor: -1,
+            }),
           );
-          proxy.userData = { floor: source.floor, zone };
+          proxy.userData = { floor: source.floor, zone, annotation };
+          if (g === base) {
+            annotation.base = proxy;
+            proxy.visible = false;
+            scene.add(proxy);
+          }
           proxy.updateMatrixWorld();
           zonePickTargets.push(proxy);
         }
@@ -1112,123 +1279,122 @@ export function initVoronoi(
     $("vIsolateCanvas").setAttribute("aria-pressed", isolateZone);
     clear(group);
     clear(diagram);
-    if (!isolateZone)
-      floorState.forEach((f, i) => {
-        if (i === activeFloor || !f.visible || !f.snapshot) return;
-        const stage = f.snapshot.stage ?? 0;
-        const r = f.snapshot.result,
-          b = f.snapshot.params.boundary;
-        if (r?.spheres.length && (stage === 4 || stage === 5)) {
-          for (const s of r.spheres) {
-            const mesh = new T.Mesh(
-              s.raw ? geometry(s.raw) : new T.SphereGeometry(s.radius, 64, 40),
-              new T.MeshPhysicalMaterial({
-                color: 0x4e9fa9,
-                roughness: 0.3,
-                metalness: 0.2,
-                transparent: true,
-                opacity: 1,
-                side: T.DoubleSide,
-                clippingPlanes:
-                  !r.params.unclippedBalloons && stage === 5
-                    ? [new T.Plane(new T.Vector3(0, 0, 1), -r.params.floor)]
-                    : [],
-              }),
-            );
-            if (!s.raw) {
-              mesh.position.set(...s.center);
-              mesh.scale.fromArray(s.axisScale || [1, 1, 1]);
-            }
-            if (wire) {
-              const lines = quadWire(s.raw || rawGeometry(mesh.geometry));
-              lines.material.clippingPlanes = mesh.material.clippingPlanes;
-              mesh.add(lines);
-            }
-            mesh.userData.otherFloor = true;
-            group.add(mesh);
-          }
-        } else if (r?.raw.indices.length && stage >= 6) {
-          let raw = r.raw;
-          if (stage === 6)
-            raw = {
-              positions: raw.positions,
-              indices: Uint32Array.from(
-                Array.from({ length: raw.indices.length / 3 }, (_, i) =>
-                  Array.from(raw.indices.slice(i * 3, i * 3 + 3)),
-                )
-                  .filter((t) =>
-                    t.every(
-                      (j) =>
-                        Math.abs(raw.positions[j * 3 + 2] - r.params.floor) <
-                        1e-6,
-                    ),
-                  )
-                  .flat(),
-              ),
-            };
+    floorState.forEach((f, i) => {
+      if (i === activeFloor || !f.visible || !f.snapshot) return;
+      const stage = f.snapshot.stage ?? 0;
+      const r = f.snapshot.result,
+        b = f.snapshot.params.boundary;
+      if (r?.spheres.length && (stage === 4 || stage === 5)) {
+        for (const s of r.spheres) {
           const mesh = new T.Mesh(
-            enclosureGeometry(
-              stage === 7 ? softenEnclosure(raw, r.params.floor) : raw,
-            ),
+            s.raw ? geometry(s.raw) : new T.SphereGeometry(s.radius, 64, 40),
             new T.MeshPhysicalMaterial({
               color: 0x4e9fa9,
-              roughness: 0.55,
+              roughness: 0.3,
               metalness: 0.2,
+              transparent: true,
+              opacity: 1,
               side: T.DoubleSide,
+              clippingPlanes:
+                !r.params.unclippedBalloons && stage === 5
+                  ? [new T.Plane(new T.Vector3(0, 0, 1), -r.params.floor)]
+                  : [],
             }),
           );
+          if (!s.raw) {
+            mesh.position.set(...s.center);
+            mesh.scale.fromArray(s.axisScale || [1, 1, 1]);
+          }
+          if (wire) {
+            const lines = quadWire(s.raw || rawGeometry(mesh.geometry));
+            lines.material.clippingPlanes = mesh.material.clippingPlanes;
+            mesh.add(lines);
+          }
           mesh.userData.otherFloor = true;
           group.add(mesh);
         }
-        if (r && stage >= 1 && stage <= 3) {
-          const chosen = new Set(stage >= 3 ? r.ids : []),
-            z = r.params.floor + 0.06;
-          r.points.forEach((p, id) => {
-            if (!p) return;
-            const dot = new T.Mesh(
-              new T.CircleGeometry(r.params.width * 0.006, 12),
-              new T.MeshBasicMaterial({
-                color: chosen.has(id) ? 0xdc24f4 : 0x21e0ed,
-                side: T.DoubleSide,
-              }),
-            );
-            dot.position.set(...p, z);
-            dot.userData.otherFloor = true;
-            group.add(dot);
-            if (stage >= 2)
-              for (const loop of r.cellLoops?.[id]?.length
-                ? r.cellLoops[id]
-                : r.cells[id]?.length
-                  ? [r.cells[id]]
-                  : []) {
-                const line = new T.LineLoop(
-                  new T.BufferGeometry().setFromPoints(
-                    loop.map((p) => new T.Vector3(...p, z)),
+      } else if (r?.raw.indices.length && stage >= 6) {
+        let raw = r.raw;
+        if (stage === 6)
+          raw = {
+            positions: raw.positions,
+            indices: Uint32Array.from(
+              Array.from({ length: raw.indices.length / 3 }, (_, i) =>
+                Array.from(raw.indices.slice(i * 3, i * 3 + 3)),
+              )
+                .filter((t) =>
+                  t.every(
+                    (j) =>
+                      Math.abs(raw.positions[j * 3 + 2] - r.params.floor) <
+                      1e-6,
                   ),
-                  new T.LineBasicMaterial({
-                    color: chosen.has(id) ? 0xdc24f4 : 0x21e0ed,
-                    transparent: true,
-                    opacity: chosen.has(id) ? 1 : 0.45,
-                  }),
-                );
-                line.userData.otherFloor = true;
-                group.add(line);
-              }
-          });
-        }
-        if (b)
-          for (const z of b.zones)
-            for (const loop of z.loops) {
+                )
+                .flat(),
+            ),
+          };
+        const mesh = new T.Mesh(
+          enclosureGeometry(
+            stage === 7 ? softenEnclosure(raw, r.params.floor) : raw,
+          ),
+          new T.MeshPhysicalMaterial({
+            color: 0x4e9fa9,
+            roughness: 0.55,
+            metalness: 0.2,
+            side: T.DoubleSide,
+          }),
+        );
+        mesh.userData.otherFloor = true;
+        group.add(mesh);
+      }
+      if (r && stage >= 1 && stage <= 3) {
+        const chosen = new Set(stage >= 3 ? r.ids : []),
+          z = r.params.floor + 0.06;
+        r.points.forEach((p, id) => {
+          if (!p) return;
+          const dot = new T.Mesh(
+            new T.CircleGeometry(r.params.width * 0.006, 12),
+            new T.MeshBasicMaterial({
+              color: chosen.has(id) ? 0xdc24f4 : 0x21e0ed,
+              side: T.DoubleSide,
+            }),
+          );
+          dot.position.set(...p, z);
+          dot.userData.otherFloor = true;
+          group.add(dot);
+          if (stage >= 2)
+            for (const loop of r.cellLoops?.[id]?.length
+              ? r.cellLoops[id]
+              : r.cells[id]?.length
+                ? [r.cells[id]]
+                : []) {
               const line = new T.LineLoop(
                 new T.BufferGeometry().setFromPoints(
-                  loop.map((p) => new T.Vector3(...p, b.elevation ?? 0)),
+                  loop.map((p) => new T.Vector3(...p, z)),
                 ),
-                new T.LineBasicMaterial({ color: 0x21e0ed }),
+                new T.LineBasicMaterial({
+                  color: chosen.has(id) ? 0xdc24f4 : 0x21e0ed,
+                  transparent: true,
+                  opacity: chosen.has(id) ? 1 : 0.45,
+                }),
               );
               line.userData.otherFloor = true;
               group.add(line);
             }
-      });
+        });
+      }
+      if (b)
+        for (const z of b.zones)
+          for (const loop of z.loops) {
+            const line = new T.LineLoop(
+              new T.BufferGeometry().setFromPoints(
+                loop.map((p) => new T.Vector3(...p, b.elevation ?? 0)),
+              ),
+              new T.LineBasicMaterial({ color: 0x21e0ed }),
+            );
+            line.userData.otherFloor = true;
+            group.add(line);
+          }
+    });
     // Context floors never enter the balloon editor's pick list. Draw them faintly
     // without writing depth, so they cannot conceal the active editing floor.
     for (const child of group.children)
@@ -1238,6 +1404,7 @@ export function initVoronoi(
           for (const material of Array.isArray(o.material)
             ? o.material
             : [o.material]) {
+            material.color?.setHex(0xd2d5d8);
             material.transparent = true;
             material.opacity = o.isMesh ? 0.18 : 0.25;
             material.depthWrite = false;
@@ -1508,6 +1675,19 @@ export function initVoronoi(
       2,
     );
   }
+  function floorHeightLimit(index, outline) {
+    const elevation = outline?.elevation;
+    if (!Number.isFinite(elevation)) return {};
+    let ceilingZ = Infinity;
+    floorState.forEach((floor, i) => {
+      if (i === index) return;
+      const other =
+        i === activeFloor ? boundary : floor.snapshot?.params?.boundary;
+      if (other?.elevation > elevation)
+        ceilingZ = Math.min(ceilingZ, other.elevation);
+    });
+    return Number.isFinite(ceilingZ) ? { ceilingZ } : {};
+  }
   function parameters() {
     if (boundary) {
       storeZone();
@@ -1515,6 +1695,7 @@ export function initVoronoi(
         unclippedBalloons: true,
         clipFloor: true,
         clipFloorEdge: true,
+        ...floorHeightLimit(activeFloor, boundary),
         boundary: structuredClone(boundary),
         zoneSettings: structuredClone(zoneConfigs),
         populatedZones: [...populatedZones],
@@ -1566,11 +1747,12 @@ export function initVoronoi(
       editing?.setBusy(false);
       const previous = floorState[activeFloor].snapshot;
       if (result && previous?.result === result)
-        restoreFloor(previous, false, true, true);
+        restoreFloor(previous, false, true, true, true);
       else {
         populatedZones = previousZones;
         zoneUI(false);
       }
+      fitNext = false;
       draw();
       $("vStatus").textContent = "Generation cancelled.";
     };
@@ -1656,10 +1838,21 @@ export function initVoronoi(
       ),
       cam,
     );
-    return zoneRay.intersectObjects(zonePickTargets, false)[0]?.object.userData;
+    return zoneRay.intersectObjects(
+      zonePickTargets.filter((object) => object.userData.floor === activeFloor),
+      false,
+    )[0]?.object.userData;
   }
   renderers.forEach((renderer, index) => {
     let down = null;
+    renderer.domElement.addEventListener("pointermove", (event) => {
+      highlightZone(
+        event.buttons ? null : zoneHit(event, renderer, index ? plan : camera),
+      );
+    });
+    renderer.domElement.addEventListener("pointerleave", () =>
+      highlightZone(null),
+    );
     renderer.domElement.addEventListener(
       "pointerdown",
       (e) => {
@@ -1862,7 +2055,12 @@ export function initVoronoi(
     try {
       for (const f of targets) {
         $("vStatus").textContent = `Populating all zones on ${f.name}…`;
-        const params = populateAllZones(f.snapshot.params);
+        const savedParams = { ...f.snapshot.params };
+        delete savedParams.ceilingZ;
+        const params = populateAllZones({
+          ...savedParams,
+          ...floorHeightLimit(next.indexOf(f), savedParams.boundary),
+        });
         const built = await new Promise((resolve, reject) => {
           cancellations.delete(cancelBatch);
           cancelBatch = () => reject(Error("Building population cancelled."));
@@ -1895,7 +2093,6 @@ export function initVoronoi(
       locked.forEach(([el, disabled]) => (el.disabled = disabled));
       editing?.setBusy(false);
       draw();
-      fit();
     }
   };
   $("vFit").onclick = fit;
@@ -2146,19 +2343,44 @@ export function initVoronoi(
             (index + 1) +
             " in Voronoi Balloons first.",
         );
-      return index === activeFloor ? accepted() : enclosure;
+      return enclosure;
     },
     () => ({
       active: activeFloor,
-      floors: floorState.flatMap((floor, index) =>
-        (
-          index === activeFloor
-            ? boundary || result
-            : floor.snapshot?.params.boundary || floor.snapshot?.result
-        )
-          ? [{ index, name: floor.name }]
-          : [],
-      ),
+      floors: floorState.map((floor, index) => {
+        const current = index === activeFloor;
+        const outline = current ? boundary : floor.snapshot?.params?.boundary;
+        const enclosure = current ? result : floor.snapshot?.result;
+        return {
+          index,
+          name: floor.name,
+          raw: enclosure?.raw,
+          perimeter: outline?.perimeter,
+          elevation: outline?.elevation ?? 0,
+        };
+      }),
+    }),
+  );
+  const showRealistic = initRealistic(realistic, () =>
+    floorState.flatMap((floor, index) => {
+      const current = index === activeFloor;
+      const outline = current ? boundary : floor.snapshot?.params?.boundary;
+      const enclosure = current ? result : floor.snapshot?.result;
+      const placedColumns = columns.getPlacedColumns(index);
+      if (!outline && !enclosure?.raw?.indices.length && !placedColumns.length)
+        return [];
+      const elevation = outline?.elevation ?? enclosure?.params.floor ?? 0;
+      return [
+        {
+          index,
+          name: floor.name,
+          elevation,
+          floor: enclosure?.params.floor ?? elevation,
+          perimeter: outline?.perimeter,
+          raw: enclosure?.raw,
+          columns: placedColumns,
+        },
+      ];
     }),
   );
   const showFacade = initFacade(
@@ -2190,17 +2412,19 @@ export function initVoronoi(
           button.getAttribute("aria-controls") === facade.id;
         facade.hidden = !facadeSelected;
         if (facadeSelected) showFacade();
-        existing.hidden = facadeSelected || i !== 2;
+        const realisticSelected =
+          button.getAttribute("aria-controls") === realistic.id;
+        realistic.hidden = !realisticSelected;
+        if (realisticSelected) showRealistic();
+        existing.hidden = true;
         pane.hidden = i !== 0;
-        party.pane.hidden = i !== 3;
+        party.pane.hidden = true;
         columns.pane.hidden = i !== 1;
         document.querySelector(".header-actions").hidden = existing.hidden;
         [...nav.children].forEach((b, j) =>
           b.setAttribute("aria-pressed", i === j),
         );
-        if (i === 3) party.show();
         if (i === 1) columns.show();
-        if (!existing.hidden) showBalloonBuild();
         if (i === 0) {
           resize();
           if (!result && !pending) draw();
@@ -2210,7 +2434,6 @@ export function initVoronoi(
   pane
     .querySelectorAll(".panel")
     .forEach((panel, i) => (panel.dataset.frameCount = i + 1));
-  addTechnicalFrames(pane);
   editing = createVoronoiEditing({
     pane,
     existing,
@@ -2228,6 +2451,15 @@ export function initVoronoi(
     },
     rhino,
   });
+  addTechnicalFrames(pane);
+  const measure = initMeasure({
+    pane,
+    renderers,
+    cameras: [camera, plan],
+    roots: (index) =>
+      index ? [group, diagram, sectionCuts] : [group, sectionCuts],
+    floorHeight: () => Number($("vn_floor").value) || 0,
+  });
   function frame() {
     requestAnimationFrame(frame);
     if (pane.hidden) return;
@@ -2242,6 +2474,7 @@ export function initVoronoi(
       renderers[0].render(sectionOverlay, camera);
       renderers[0].autoClear = true;
     }
+    measure.render(0);
     editing?.beforePlan();
     renderers[1].localClippingEnabled = true;
     sectionOutline.visible = sectionGizmo.visible = false;
@@ -2253,6 +2486,44 @@ export function initVoronoi(
     renderers[1].autoClear = true;
     if (result) editing?.renderPlan(renderers[1], plan);
     editing?.afterPlan();
+    measure.render(1);
+    if ($("vZoneLabels").checked) {
+      for (const { anchor, labels, labelDirection } of zoneAnnotations) {
+        labels.forEach((label, index) => {
+          const view = index ? plan : camera;
+          const layer = zoneLabels[index];
+          const width = layer.clientWidth / 2;
+          const height = layer.clientHeight / 2;
+          const { x, y, z } = projectedZoneLabel.copy(anchor).project(view);
+          label.hidden = Math.abs(x) > 1 || Math.abs(y) > 1 || Math.abs(z) > 1;
+          if (label.hidden) return;
+          labelX
+            .copy(anchor)
+            .addScaledVector(labelDirection, 0.01)
+            .project(view);
+          labelY
+            .set(
+              anchor.x + labelDirection.y * 0.01,
+              anchor.y - labelDirection.x * 0.01,
+              anchor.z,
+            )
+            .project(view);
+          const a = (labelX.x - x) * width;
+          const b = (y - labelX.y) * height;
+          const c = (labelY.x - x) * width;
+          const d = (y - labelY.y) * height;
+          const scale = Math.max(Math.hypot(a, b), Math.hypot(c, d), 1e-9);
+          label.style.left = (x + 1) * 50 + "%";
+          label.style.top = (1 - y) * 50 + "%";
+          label.style.setProperty(
+            "--zone-label-plane",
+            "matrix(" +
+              [a / scale, b / scale, c / scale, d / scale, 0, 0].join(",") +
+              ")",
+          );
+        });
+      }
+    }
   }
   frame();
   zoneUI();

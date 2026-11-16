@@ -44,6 +44,7 @@ export function placeSavedFloor(data, elevation) {
     for (const event of s.popEvents ?? []) point(event.center);
   }
   params.floor += delta;
+  if (Number.isFinite(params.ceilingZ)) params.ceilingZ += delta;
   if (params.boundary)
     params.boundary.elevation = (params.boundary.elevation ?? 0) + delta;
   if (params.domain)

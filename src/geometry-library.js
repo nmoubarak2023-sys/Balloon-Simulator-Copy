@@ -69,6 +69,7 @@ export function canvasThumbnail(renderer, scene, camera) {
 
 export function mountGeometryLibrary({
   initiallyOpen = true,
+  showStorageNote = true,
   workspace,
   container,
   save,
@@ -80,7 +81,8 @@ export function mountGeometryLibrary({
   panel.id = `saved-geometry-${workspace}`;
   panel.open = initiallyOpen;
   panel.innerHTML =
-    '<summary>SAVED GEOMETRY</summary><div class="section-body"><label>Geometry name<input class="geometry-name" type="text" maxlength="100" placeholder="Name this geometry"></label><button class="geometry-save primary">SAVE GEOMETRY ↗</button><p class="note">Saved in this browser for this website address. Saved entries survive refresh. Download a project JSON for a portable backup.</p><label class="check"><input class="geometry-trash" type="checkbox"> Show removed geometries</label><div class="geometry-list"></div><p class="geometry-message note" role="status"></p></div>';
+    '<summary>SAVED GEOMETRY</summary><div class="section-body"><label>Geometry name<input class="geometry-name" type="text" maxlength="100" placeholder="Name this geometry"></label><button class="geometry-save primary">SAVE GEOMETRY ↗</button><p class="note geometry-storage-note">Saved in this browser for this website address. Saved entries survive refresh. Download a project JSON for a portable backup.</p><label class="check"><input class="geometry-trash" type="checkbox"> Show removed geometries</label><div class="geometry-list"></div><p class="geometry-message note" role="status"></p></div>';
+  if (!showStorageNote) panel.querySelector(".geometry-storage-note").remove();
   container.prepend(panel);
   const name = panel.querySelector(".geometry-name"),
     list = panel.querySelector(".geometry-list"),

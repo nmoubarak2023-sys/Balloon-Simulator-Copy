@@ -194,16 +194,25 @@ export function voronoiBuild(m, p) {
     .slice(0, selected)
     .map((a) => a.i);
   const rr = random(radiusSeed),
-    generated = selectedIds.map((id) => ({
-      id,
-      axisScale: [0, 1, 2].map((k) => p.edits?.[id]?.[4 + k] ?? 1),
-      center: points[id]
-        .map((v, k) => v + (p.edits?.[id]?.[k] || 0))
-        .concat((p.domain?.elevation ?? 0) + (p.edits?.[id]?.[2] || 0)),
-      radius:
-        (radiusMin + rr() * (radiusMax - radiusMin)) *
-        (p.edits?.[id]?.[3] ?? 1),
-    }));
+    generated = selectedIds.map((id) => {
+      const edit = p.edits?.[id];
+      const radius = radiusMin + rr() * (radiusMax - radiusMin);
+      const elevation = p.domain?.elevation ?? 0;
+      const clearance = p.ceilingZ - elevation;
+      const verticalBase = clearance > 0 ? Math.min(1, clearance / radius) : 1;
+      return {
+        id,
+        axisScale: [
+          edit?.[4] ?? 1,
+          edit?.[5] ?? 1,
+          verticalBase * (edit?.[6] ?? 1),
+        ],
+        center: points[id]
+          .map((value, axis) => value + (edit?.[axis] ?? 0))
+          .concat(elevation + (edit?.[2] ?? 0)),
+        radius: radius * (edit?.[3] ?? 1),
+      };
+    });
   const frozen = p.frozen ?? {},
     popped = new Set(p.popped ?? []);
   const spheres = generated

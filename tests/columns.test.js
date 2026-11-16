@@ -168,3 +168,37 @@ test("trumpet is vertical at the base and tangent to the canopy, instead of a co
       );
     }
 });
+
+test("collision search recovers a seam missed by coarse roof vertices", () => {
+  const height = Math.sqrt(25 - 4);
+  const result = {
+    params: { width: 18, spacing: 1, floor: 0 },
+    ids: [12, 34],
+    spheres: [
+      { center: [-2, 0, 0], radius: 5 },
+      { center: [2, 0, 0], radius: 5 },
+    ],
+    raw: {
+      positions: new Float64Array([
+        -9,
+        -6,
+        height,
+        9,
+        -6,
+        height,
+        9,
+        6,
+        height,
+        -9,
+        6,
+        height,
+      ]),
+      indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+    },
+  };
+  const [seam] = collisionSites(result);
+  assert.ok(seam);
+  assert.deepEqual(seam.balloons, result.ids);
+  assert.ok(Math.abs(seam.x) < 0.001);
+  assert.equal(seam.z, height);
+});

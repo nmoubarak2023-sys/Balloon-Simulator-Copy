@@ -40,7 +40,7 @@ export function createVoronoiEditing({
   }
   const $ = (id) => pane.querySelector("#ve_" + id);
   const tools = document.createElement("div");
-  tools.className = "canvas-tools";
+  tools.className = "voronoi-command-options";
   tools.innerHTML = [
     "orbit",
     "move",
@@ -59,7 +59,29 @@ export function createVoronoiEditing({
   axisTools.setAttribute("aria-label", "Scale 1D direction");
   axisTools.innerHTML =
     '<button type="button" data-axis="0">X</button><button type="button" data-axis="1">Y</button><button type="button" data-axis="2">Z (VERTICAL)</button>';
-  pane.querySelector(".voro-steps").after(tools, axisTools);
+  const commandMenu = document.createElement("details");
+  commandMenu.className = "voronoi-command";
+  const commandLabel = document.createElement("summary");
+  commandLabel.textContent = "INDIVIDUAL BALLOON COMMANDS";
+  const commandPanel = document.createElement("div");
+  commandPanel.className = "voronoi-command-panel";
+  commandMenu.append(commandLabel, commandPanel);
+  commandPanel.append(tools);
+  pane.querySelector("#vSpheres").after(commandMenu);
+  pane.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (!commandMenu.contains(event.target)) commandMenu.open = false;
+    },
+    true,
+  );
+  commandMenu.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !commandMenu.open) return;
+    event.preventDefault();
+    if (!busy) event.stopPropagation();
+    commandMenu.open = false;
+    commandLabel.focus();
+  });
   const operations = document.createElement("div");
   operations.className = "balloon-actions";
   operations.setAttribute("aria-label", "Voronoi balloon operations");
@@ -71,10 +93,11 @@ export function createVoronoiEditing({
   rotationControls.innerHTML =
     '<label for="ve_rotateAxis">Rotation axis</label><select id="ve_rotateAxis"><option value="0">X</option><option value="1">Y</option><option value="2" selected>Z (vertical)</option></select><label for="ve_rotateDegrees">Degrees</label><input id="ve_rotateDegrees" type="number" step="any" value="0"><button id="ve_rotateBalloon">ROTATE SELECTED</button><button id="ve_resetRotation">RESET ROTATION</button>';
   const dock = document.createElement("section");
-  dock.className = "voronoi-operation-dock";
+  dock.className = "voronoi-operation-dock panel";
   dock.setAttribute("aria-label", "Balloon editing controls");
   pane.querySelector("#vPlan").closest(".panel").before(dock);
-  dock.append(tools, axisTools, rotationControls, operations);
+  commandPanel.append(operations);
+  dock.append(axisTools, rotationControls);
   pane.classList.add("voronoi-uppercase");
   const degreeEntry = document.createElement("input");
   degreeEntry.type = "number";
@@ -194,6 +217,7 @@ export function createVoronoiEditing({
     }
   }
   function paint() {
+    dock.hidden = tool !== "rotate" && tool !== "scale1d";
     rotationControls.hidden = tool !== "rotate";
     rotationControls.classList.toggle(
       "scale1d-controls",
@@ -385,9 +409,13 @@ export function createVoronoiEditing({
     if (["move", "scale", "scale1d", "rotate"].includes(tool)) showBalloons();
     paint();
   }
-  tools
-    .querySelectorAll("button")
-    .forEach((b) => (b.onclick = () => setTool(b.dataset.veTool)));
+  tools.querySelectorAll("button").forEach((button) => {
+    button.onclick = () => {
+      setTool(button.dataset.veTool);
+      commandMenu.open = false;
+      commandLabel.focus();
+    };
+  });
   function begin() {
     if (!target || busy || (target === "balloon" && isFrozen())) return;
     ensure();

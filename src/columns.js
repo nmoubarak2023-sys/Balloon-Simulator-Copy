@@ -44,22 +44,22 @@ export function collisionSites(result) {
     floor = params.floor;
   const sample = roofSampler(raw),
     native = spheres.map((s) => (s.raw ? roofSampler(s.raw) : null));
+  const roof = (i, x, y) => {
+    if (native[i]) return native[i](x, y);
+    const { radius, center } = spheres[i];
+    const q = radius ** 2 - (x - center[0]) ** 2 - (y - center[1]) ** 2;
+    return q >= 0 ? center[2] + Math.sqrt(q) : null;
+  };
   const owner = (x, y) => {
-    let best = -Infinity,
-      id = -1;
-    spheres.forEach((s, i) => {
-      const q =
-        s.radius * s.radius - (x - s.center[0]) ** 2 - (y - s.center[1]) ** 2;
-      const z = native[i]
-        ? native[i](x, y)
-        : q >= 0
-          ? s.center[2] + Math.sqrt(q)
-          : -Infinity;
+    let best = -Infinity;
+    let id = -1;
+    for (let i = 0; i < spheres.length; i++) {
+      const z = roof(i, x, y);
       if (z !== null && z > best) {
         best = z;
         id = i;
       }
-    });
+    }
     return id;
   };
   const p = raw.positions,
@@ -84,7 +84,7 @@ export function collisionSites(result) {
     const x = v.reduce((s, v) => s + v[0], 0) / 3,
       y = v.reduce((s, v) => s + v[1], 0) / 3,
       z = sample(x, y);
-    if (z === null || z <= floor + params.spacing * 0.5) continue;
+    if (z === null || z <= floor + 1e-4) continue;
     candidates.push({
       x,
       y,
@@ -93,6 +93,59 @@ export function collisionSites(result) {
       balloons: unique.map((i) => result.ids[i]),
       key: unique.join(":"),
     });
+  }
+  // A remesh can put both sides of an intersection in triangles whose
+  // vertices all resolve to one owner. Find those seams on the actual cutters.
+  if (!candidates.length) {
+    for (let left = 0; left < spheres.length; left++) {
+      for (let right = left + 1; right < spheres.length; right++) {
+        const a = spheres[left].center;
+        const b = spheres[right].center;
+        const xy = (t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        const gap = (t) => {
+          const [x, y] = xy(t);
+          const l = roof(left, x, y);
+          const r = roof(right, x, y);
+          return l === null || r === null ? null : l - r;
+        };
+        let previous = null;
+        for (let step = 0; step <= 20; step++) {
+          const t = step / 20;
+          const delta = gap(t);
+          if (delta !== null && previous !== null && delta * previous <= 0) {
+            let lo = (step - 1) / 20;
+            let hi = t;
+            for (let pass = 0; pass < 10; pass++) {
+              const mid = (lo + hi) / 2;
+              const value = gap(mid);
+              if (value === null) break;
+              if (value * previous > 0) lo = mid;
+              else hi = mid;
+            }
+            const [x, y] = xy((lo + hi) / 2);
+            const z = sample(x, y);
+            const top = roof(left, x, y);
+            if (
+              z !== null &&
+              top !== null &&
+              z > floor + 1e-4 &&
+              Math.abs(z - top) <= Math.max(0.1, params.spacing * 0.5)
+            ) {
+              candidates.push({
+                x,
+                y,
+                z,
+                kind: "seam",
+                balloons: [result.ids[left], result.ids[right]],
+                key: left + ":" + right,
+              });
+            }
+            break;
+          }
+          previous = delta;
+        }
+      }
+    }
   }
   // Junctions first, then low points along each visible collision seam.
   candidates.sort(
@@ -263,4 +316,22 @@ export function columnMesh(source, site, settings) {
     rings: rows + 1,
     sides,
   };
+}
+
+export function resizePlacedColumnBase(raw, site, radius) {
+  const positions = new Float64Array(raw.positions);
+  const current = Math.hypot(positions[0] - site.x, positions[1] - site.y);
+  if (!(current > 0 && Number.isFinite(radius) && radius > 0))
+    throw Error("Enter a positive bottom radius.");
+  const ratio = radius / current;
+  for (let ring = 0; ring < raw.rings - 1; ring++) {
+    const t = ring / (raw.rings - 1);
+    const scale = ratio ** (1 - t * t * (3 - 2 * t));
+    for (let side = 0; side < raw.sides; side++) {
+      const i = (ring * raw.sides + side) * 3;
+      positions[i] = site.x + (positions[i] - site.x) * scale;
+      positions[i + 1] = site.y + (positions[i + 1] - site.y) * scale;
+    }
+  }
+  return { ...raw, positions, baseResized: true };
 }

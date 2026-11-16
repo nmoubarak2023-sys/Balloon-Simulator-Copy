@@ -78,6 +78,7 @@ export function zonedVoronoiBuild(m, p) {
           width: bounds.width,
           height: bounds.height,
           floor: p.floor,
+          ...(p.ceilingZ === undefined ? {} : { ceilingZ: p.ceilingZ }),
           spacing: p.spacing,
           smoothing: p.smoothing,
           domain: { loops: z.loops, elevation: boundary.elevation ?? 0 },
