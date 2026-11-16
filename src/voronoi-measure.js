@@ -1,3 +1,4 @@
+import { queueAutosave } from "./autosave.js";
 import * as T from "three";
 
 export function initMeasure({ pane, renderers, cameras, roots, floorHeight }) {
@@ -49,7 +50,7 @@ export function initMeasure({ pane, renderers, cameras, roots, floorHeight }) {
     pendingPointer,
     down;
   function updateReadout() {
-    if (!active) return;
+    if (!active && !end) return;
     if (!start) readout.textContent = "PICK FIRST POINT";
     else if (!end) readout.textContent = "PICK SECOND POINT";
     else {
@@ -218,6 +219,7 @@ export function initMeasure({ pane, renderers, cameras, roots, floorHeight }) {
         updateReadout();
         active = false;
         button.setAttribute("aria-pressed", "false");
+        queueAutosave();
         return;
       }
       updateReadout();
@@ -240,6 +242,14 @@ export function initMeasure({ pane, renderers, cameras, roots, floorHeight }) {
     });
   });
   return {
+    save: () => end && [start.toArray(), end.toArray()],
+    load(points) {
+      if (!points) return;
+      toggle(false);
+      [start, end] = points.map((point) => new T.Vector3(...point));
+      readout.hidden = false;
+      updateReadout();
+    },
     render(index) {
       if (!active && !end) return;
       if (active && pendingPointer) {

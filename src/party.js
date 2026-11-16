@@ -741,6 +741,8 @@ export function initBalloonParty(rhino) {
   }
   return {
     pane,
+    saveSession: () => ({ format: "balloon-party", version: 1, ...snapshot() }),
+    loadSession: loadPartyProject,
     show() {
       resize();
       fit();

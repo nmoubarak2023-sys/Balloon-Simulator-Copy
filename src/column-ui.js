@@ -1,3 +1,4 @@
+import { collisionRidges, wallMesh } from "./walls.js";
 import * as T from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { geometry, quadWire } from "./view.js";
@@ -12,14 +13,95 @@ import {
 } from "./columns.js";
 import { meshQuality } from "./mesh-quality.js";
 import { isUndoShortcut } from "./history.js";
-export function initColumns(rhino, getVoronoi, getFloors) {
+import { inLoops } from "./zones.js";
+
+function zoneNameMesh(zone, elevation, active) {
+  const [outer, ...holes] = zone.loops.map((loop) =>
+    loop.map((point) => new T.Vector2(...point)),
+  );
+  if (!zone.name || !outer || outer.length < 3) return;
+  const triangles = T.ShapeUtils.triangulateShape(outer, holes);
+  const vertices = outer.concat(...holes);
+  const bounds = new T.Box2().setFromPoints(outer);
+  const anchor = bounds.getCenter(new T.Vector2());
+  if (!inLoops(anchor.toArray(), zone.loops)) {
+    let largest = 0;
+    for (const [i, j, k] of triangles) {
+      const [a, b, c] = [vertices[i], vertices[j], vertices[k]];
+      const area = Math.abs(b.clone().sub(a).cross(c.clone().sub(a)));
+      if (area <= largest) continue;
+      largest = area;
+      anchor.copy(a).add(b).add(c).divideScalar(3);
+    }
+    if (!largest) return;
+  }
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  const name = zone.name.toUpperCase();
+  const font = "32px sans-serif";
+  ctx.font = font;
+  canvas.width = Math.ceil(ctx.measureText(name).width) + 16;
+  canvas.height = 48;
+  ctx.font = font;
+  ctx.fillStyle = active ? "#a4d4db" : "#d2d5d8";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(name, canvas.width / 2, canvas.height / 2);
+
+  const size = bounds.getSize(new T.Vector2());
+  const width = Math.min(canvas.width / 48, 0.65 * Math.min(size.x, size.y));
+  const mesh = new T.Mesh(
+    new T.PlaneGeometry(width, (width * canvas.height) / canvas.width),
+    new T.MeshBasicMaterial({
+      map: new T.CanvasTexture(canvas),
+      transparent: true,
+      opacity: active ? 0.8 : 0.38,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  const edge = new T.Vector2();
+  for (let i = 0; i < outer.length; i++) {
+    const direction = outer[(i + 1) % outer.length].clone().sub(outer[i]);
+    if (direction.lengthSq() > edge.lengthSq()) edge.copy(direction);
+  }
+  mesh.rotation.z = Math.atan2(edge.y, edge.x) + (edge.x < 0 ? Math.PI : 0);
+  mesh.position.set(anchor.x, anchor.y, elevation + 0.04);
+  mesh.renderOrder = 5;
+  return mesh;
+}
+export function initColumns(
+  rhino,
+  getVoronoi,
+  getFloors,
+  { walls = false } = {},
+) {
+  const findSites = walls ? collisionRidges : collisionSites;
+  const buildSupport = walls ? wallMesh : columnMesh;
+  const projectName = walls ? "wall-populate" : "column-populate";
+  const supportName = walls ? "Wall" : "Column";
   const pane = document.createElement("main");
-  pane.id = "columnWorkspace";
+  pane.id = walls ? "wallWorkspace" : "columnWorkspace";
   pane.hidden = true;
   document.querySelector("main").after(pane);
   pane.innerHTML = `<div class="floor-toolbar" aria-label="Building floors"><strong>BUILDING FLOORS</strong><label>Editing floor<select id="cFloor"></select></label><button id="cImport" class="primary">COPY SELECTED FLOOR ↗</button><div class="column-floor-visibility-row"><div id="cFloorVisibility"></div><label class="check"><input id="cIsolateFloor" type="checkbox"> ISOLATE FLOOR</label></div></div><div class="voro-layout"><section class="panel" data-frame-count="1"><div class="panel-heading"><span>PERSPECTIVE <small>01 / COLUMN POPULATE</small></span><button id="cFit">FIT ↗</button></div><div class="canvas-tools"><button id="cPick" aria-pressed="true">PICK COLLISION</button><button id="cGhost" aria-pressed="true">GHOST ENCLOSURE</button><button id="cFocus">FOCUS COLUMN</button><button id="cWire" aria-pressed="false">WIRE</button></div><div id="cPerspective" class="voro-canvas"></div></section><aside><section class="panel" data-frame-count="2"><div class="panel-heading">PLAN VIEW <small>02 / SUPPORT LOCATIONS</small></div><div id="cPlan" class="voro-plan"></div></section><section class="panel" data-frame-count="3"><div class="panel-heading">CONTROL PANEL <small>03 / COLUMN POPULATE</small></div><div class="voro-controls"><label>Collision location<select id="cSites"></select></label><button id="cPlace">PLACE AT SELECTED COLLISION ↗</button><label>Placed column<select id="cColumns"></select></label>${[
-    ["Bottom", "Bottom radius (ft)", 1, 0.1, 20, 0.1],
-    ["Flare", "Top radius (ft)", 5, 0.1, 30, 0.1],
+    [
+      "Bottom",
+      walls ? "Base thickness (ft)" : "Bottom radius (ft)",
+      1,
+      0.1,
+      20,
+      0.1,
+    ],
+    [
+      "Flare",
+      walls ? "Vault blend width (ft)" : "Top radius (ft)",
+      walls ? 3 : 5,
+      0.1,
+      30,
+      0.1,
+    ],
     ["Blend", "Canopy blend (%)", 55, 10, 90, 1],
   ]
     .map(
@@ -28,10 +110,39 @@ export function initColumns(rhino, getVoronoi, getFloors) {
     )
     .join(
       "",
-    )}<label>COLUMN CONTROL<select id="cScope"><option value="individual">INDIVIDUAL</option><option value="floor">GLOBAL · EDITING FLOOR</option><option value="global">GLOBAL · ALL FLOORS</option></select></label><button id="cApply">APPLY TO SELECTED COLUMN ↗</button><div class="pair"><button id="cRemove">REMOVE COLUMN</button><button id="cUndo">UNDO / CTRL+Z</button></div><label class="check"><input id="cRoofExport" type="checkbox" checked> Include hollow enclosure and floor plate</label><label>Shell thickness (ft)<input id="cShellThickness" type="number" value="1" min="0.1" step="any" required></label><div class="pair"><button id="cObj">EXPORT .OBJ</button><button id="c3dm">EXPORT .3DM</button></div><button id="cSave">SAVE COLUMN PROJECT</button><label class="button" for="cLoad">OPEN COLUMN PROJECT</label><input id="cLoad" type="file" accept=".json" hidden><pre id="cReport" class="iteration-report">Copy a Voronoi enclosure to begin.</pre></div></section></aside></div><div class="status-bar" id="cStatus" role="status">Generate in Voronoi Balloons, then copy it here.</div>`;
-  const $ = (id) => pane.querySelector("#" + id),
+    )}<label>COLUMN CONTROL<select id="cScope"><option value="individual">INDIVIDUAL</option><option value="floor">GLOBAL · EDITING FLOOR</option><option value="global">GLOBAL · ALL FLOORS</option></select></label><button id="cApply">APPLY TO SELECTED ↗</button><div class="pair"><button id="cRemove">REMOVE COLUMN</button><button id="cUndo">UNDO / CTRL+Z</button></div><label class="check"><input id="cRoofExport" type="checkbox" checked> Include hollow enclosure and floor plate</label><label>Shell thickness (ft)<input id="cShellThickness" type="number" value="1" min="0.1" step="any" required></label><div class="pair"><button id="cObj">EXPORT .OBJ</button><button id="c3dm">EXPORT .3DM</button></div><button id="cSave">SAVE COLUMN PROJECT</button><label class="button" for="cLoad">OPEN COLUMN PROJECT</label><input id="cLoad" type="file" accept=".json" hidden><pre id="cReport" class="iteration-report">Copy a Voronoi enclosure to begin.</pre></div></section></aside></div><div class="status-bar" id="cStatus" role="status">Generate in Voronoi Balloons, then copy it here.</div>`;
+  const controlId = (id) => (walls ? "wall-" + id : id);
+  let showZones = true;
+  if (walls) {
+    pane.classList.add("voronoi-uppercase");
+    pane.innerHTML = pane.innerHTML
+      .replace(/\bcolumn\b/gi, (word) =>
+        word === "COLUMN" ? "WALL" : word === "Column" ? "Wall" : "wall",
+      )
+      .replace(
+        " ISOLATE FLOOR</label>",
+        ' ISOLATE FLOOR</label><label class="check"><input id="cZones" type="checkbox" checked> SHOW ZONES</label>',
+      )
+      .replaceAll("COLLISION", "RIDGE")
+      .replace("Collision location", "Collision ridge")
+      .replace(
+        'class="wall-floor-visibility-row"',
+        'class="column-floor-visibility-row"',
+      );
+    pane.querySelectorAll("[id]").forEach((element) => {
+      element.id = controlId(element.id);
+    });
+    pane.querySelectorAll("label[for]").forEach((label) => {
+      label.htmlFor = controlId(label.htmlFor);
+    });
+  }
+  const $ = (id) => pane.querySelector("#" + controlId(id)),
     status = (s) => {
-      $("cStatus").textContent = s;
+      $("cStatus").textContent = walls
+        ? s
+            .replace(/column/gi, "wall")
+            .replace("click a pink marker", "click a pink ridge")
+        : s;
     };
   let source,
     sites = [],
@@ -117,6 +228,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
       group.remove(o);
       o.traverse((n) => {
         n.geometry?.dispose();
+        n.material?.map?.dispose();
         n.material?.dispose();
       });
     }
@@ -133,7 +245,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
   });
   function snapshot() {
     return {
-      format: "column-populate",
+      format: projectName,
       version: 1,
       source: structuredClone(source),
       columns: structuredClone(columns),
@@ -178,6 +290,32 @@ export function initColumns(rhino, getVoronoi, getFloors) {
           : floorVisibility.get(floor.index) === false
       )
         continue;
+      if (walls && showZones) {
+        for (const zone of floor.zones ?? []) {
+          const label = zoneNameMesh(
+            zone,
+            floor.elevation,
+            floor.index === workingFloor,
+          );
+          if (label) context.add(label);
+          for (const loop of zone.loops) {
+            const line = new T.LineLoop(
+              new T.BufferGeometry().setFromPoints(
+                loop.map(
+                  ([x, y]) => new T.Vector3(x, y, floor.elevation + 0.025),
+                ),
+              ),
+              new T.LineBasicMaterial({
+                color: floor.index === workingFloor ? 0x80dce7 : 0xd2d5d8,
+                transparent: true,
+                opacity: floor.index === workingFloor ? 0.65 : 0.23,
+                depthWrite: false,
+              }),
+            );
+            context.add(line);
+          }
+        }
+      }
       if (floor.index === workingFloor && source) continue;
       const saved = floorWork.get(floor.index);
       const raw = saved?.source.raw ?? floor.raw;
@@ -202,6 +340,11 @@ export function initColumns(rhino, getVoronoi, getFloors) {
     }
     root.visible = markers.visible = isFloorVisible(workingFloor);
   }
+  if (walls)
+    $("cZones").onchange = (event) => {
+      showZones = event.target.checked;
+      displayFloors();
+    };
   function updateColumnControls() {
     const global = globalMode();
     const hasColumns =
@@ -212,9 +355,13 @@ export function initColumns(rhino, getVoronoi, getFloors) {
         ));
     $("cApply").textContent = global
       ? allFloors()
-        ? "APPLY TO ALL COLUMNS ↗"
+        ? walls
+          ? "APPLY TO ALL WALLS ↗"
+          : "APPLY TO ALL COLUMNS ↗"
         : "APPLY TO EDITING FLOOR ↗"
-      : "APPLY TO SELECTED COLUMN ↗";
+      : walls
+        ? "APPLY TO SELECTED WALL ↗"
+        : "APPLY TO SELECTED COLUMN ↗";
     $("cApply").disabled = global ? !hasColumns : selected < 0;
     $("cUndo").disabled = !history.length;
   }
@@ -256,6 +403,20 @@ export function initColumns(rhino, getVoronoi, getFloors) {
     if (pick)
       for (const site of sites) {
         const used = columns.some((c) => c.site.id === site.id);
+        if (walls) {
+          const ridge = new T.Line(
+            new T.BufferGeometry().setFromPoints(
+              site.path.map((p) => new T.Vector3(...p)),
+            ),
+            new T.LineBasicMaterial({
+              color: used ? 0xffffff : 0xfb88fc,
+              depthTest: false,
+            }),
+          );
+          ridge.renderOrder = 50;
+          markers.add(ridge);
+          continue;
+        }
         const marker = new T.Mesh(
           new T.SphereGeometry(
             Math.max(0.3, source.params.width * 0.006),
@@ -325,7 +486,14 @@ export function initColumns(rhino, getVoronoi, getFloors) {
   }
   function place(site) {
     if (!source) throw Error("Copy a Voronoi enclosure first.");
-    const found = columns.findIndex((c) => c.site.id === site.id);
+    const found = columns.findIndex(
+      (c) =>
+        c.site.id === site.id &&
+        (!walls ||
+          (c.site.pair === site.pair &&
+            c.site.x === site.x &&
+            c.site.y === site.y)),
+    );
     if (found >= 0) {
       selected = found;
       syncSettings();
@@ -334,7 +502,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
       return;
     }
     const s = settings(),
-      raw = columnMesh(source, site, s);
+      raw = buildSupport(source, site, s);
     remember();
     columns = [...columns, { site: structuredClone(site), settings: s, raw }];
     selected = columns.length - 1;
@@ -362,7 +530,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
       spheres: structuredClone(result.spheres),
       ids: [...result.ids],
     };
-    const found = collisionSites(next);
+    const found = findSites(next);
     if (source) remember();
     source = next;
     sites = found;
@@ -491,6 +659,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
             return column;
           try {
             const raw =
+              !walls &&
               Object.keys(changes).length === 1 &&
               changes.bottomRadius !== undefined
                 ? resizePlacedColumnBase(
@@ -498,7 +667,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
                     column.site,
                     changes.bottomRadius,
                   )
-                : columnMesh(currentSource, column.site, settings);
+                : buildSupport(currentSource, column.site, settings);
             count++;
             return { ...column, settings, raw };
           } catch (error) {
@@ -552,13 +721,13 @@ export function initColumns(rhino, getVoronoi, getFloors) {
     )
       return;
     const raw =
-      s.flare === current.flare && s.blend === current.blend
+      !walls && s.flare === current.flare && s.blend === current.blend
         ? resizePlacedColumnBase(
             columns[selected].raw,
             columns[selected].site,
             s.bottomRadius,
           )
-        : columnMesh(source, columns[selected].site, s);
+        : buildSupport(source, columns[selected].site, s);
     remember();
     columns = columns.map((column, i) =>
       i === selected ? { ...column, settings: s, raw } : column,
@@ -638,7 +807,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
   };
   function restore(data) {
     if (
-      data.format !== "column-populate" ||
+      data.format !== projectName ||
       data.version !== 1 ||
       !data.source?.raw ||
       !Array.isArray(data.columns) ||
@@ -649,7 +818,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
     next.raw = rawCopy(next.raw);
     if (!Number.isFinite(next.params?.width) || !next.spheres?.length)
       throw Error("Invalid enclosure.");
-    const found = collisionSites(next),
+    const found = findSites(next),
       rebuilt = data.columns.map((c) => {
         if (!c.site || ![c.site.x, c.site.y].every(Number.isFinite))
           throw Error("Invalid column location.");
@@ -658,7 +827,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
           raw:
             c.raw?.baseResized && c.raw.sides === 64 && c.raw.rings === 65
               ? { ...c.raw, ...rawCopy(c.raw) }
-              : columnMesh(next, c.site, c.settings),
+              : buildSupport(next, c.site, c.settings),
         };
       });
     source = next;
@@ -735,13 +904,48 @@ export function initColumns(rhino, getVoronoi, getFloors) {
             distance = 14;
           for (const s of sites) {
             const p = new T.Vector3(s.x, s.y, s.z).project(view);
-            if (p.z < -1 || p.z > 1) continue;
+            if (!walls && (p.z < -1 || p.z > 1)) continue;
             const d = Math.hypot(
               e.clientX - rect.left - ((p.x + 1) * rect.width) / 2,
               e.clientY - rect.top - ((1 - p.y) * rect.height) / 2,
             );
-            if (d < distance) {
-              distance = d;
+            let proximity = walls ? Infinity : d;
+            if (walls) {
+              const cursor = new T.Vector2(
+                e.clientX - rect.left,
+                e.clientY - rect.top,
+              );
+              let previous;
+              for (const point of s.path) {
+                const projected = new T.Vector3(...point).project(view);
+                const screen = new T.Vector2(
+                  ((projected.x + 1) * rect.width) / 2,
+                  ((1 - projected.y) * rect.height) / 2,
+                );
+                if (projected.z < -1 || projected.z > 1) {
+                  previous = undefined;
+                  continue;
+                }
+                if (previous) {
+                  const segment = screen.clone().sub(previous);
+                  const t = T.MathUtils.clamp(
+                    cursor.clone().sub(previous).dot(segment) /
+                      (segment.lengthSq() || 1),
+                    0,
+                    1,
+                  );
+                  proximity = Math.min(
+                    proximity,
+                    cursor.distanceTo(
+                      previous.clone().addScaledVector(segment, t),
+                    ),
+                  );
+                }
+                previous = screen;
+              }
+            }
+            if (proximity < distance) {
+              distance = proximity;
               nearest = s;
             }
           }
@@ -784,7 +988,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
     if (!includeShell && !columns.length)
       throw Error("Place at least one column first.");
     const columnItems = columns.map((column, i) => ({
-      name: "Column " + (i + 1),
+      name: supportName + " " + (i + 1),
       raw: column.raw,
     }));
     let shell;
@@ -831,7 +1035,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
       text += out.text;
       offset += out.vertices;
     }
-    download(text, "column-populate.obj");
+    download(text, projectName + ".obj");
     status("OBJ exported.");
   });
   $("c3dm").onclick = guarded(async () => {
@@ -841,7 +1045,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
     try {
       doc.settings().modelUnitSystem = r.UnitSystem.Feet;
       for (const item of items) addRhinoQuadMesh(r, doc, item.raw, item.name);
-      download(doc.toByteArray(), "column-populate.3dm");
+      download(doc.toByteArray(), projectName + ".3dm");
       status("Rhino assembly exported.");
     } finally {
       doc.delete();
@@ -851,7 +1055,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
     JSON.stringify(data, (_, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v));
   $("cSave").onclick = guarded(() => {
     if (!source) throw Error("Copy an enclosure first.");
-    download(serialize(snapshot()), "column-populate.json");
+    download(serialize(snapshot()), projectName + ".json");
   });
   $("cLoad").onchange = guarded(async () => {
     const file = $("cLoad").files[0];
@@ -862,7 +1066,7 @@ export function initColumns(rhino, getVoronoi, getFloors) {
     $("cLoad").value = "";
   });
   mountGeometryLibrary({
-    workspace: "columns",
+    workspace: walls ? "walls" : "columns",
     showStorageNote: false,
     container: pane.querySelector(".voro-controls"),
     save: () => {
@@ -887,6 +1091,52 @@ export function initColumns(rhino, getVoronoi, getFloors) {
   return {
     pane,
     accept,
+    saveSession() {
+      const floors = new Map(floorWork);
+      if (workingFloor !== undefined && source)
+        floors.set(workingFloor, {
+          source,
+          sites,
+          columns,
+          selected,
+          copiedEnclosure,
+        });
+      return {
+        floors,
+        workingFloor,
+        floorVisibility,
+        isolateEditingFloor,
+        showZones,
+        ghost,
+        wire,
+        settings: settings(),
+        scope: $("cScope").value,
+      };
+    },
+    loadSession(data) {
+      if (!data) return;
+      floorWork.clear();
+      for (const [index, floor] of data.floors) floorWork.set(index, floor);
+      for (const [index, visible] of data.floorVisibility)
+        floorVisibility.set(index, visible);
+      isolateEditingFloor = data.isolateEditingFloor;
+      $("cIsolateFloor").checked = isolateEditingFloor;
+      showZones = data.showZones;
+      if (walls) $("cZones").checked = showZones;
+      ghost = data.ghost;
+      wire = data.wire;
+      $("cScope").value = data.scope;
+      $("cBottom").value = $("crBottom").value = data.settings.bottomRadius;
+      $("cFlare").value = $("crFlare").value = data.settings.flare;
+      $("cBlend").value = $("crBlend").value = Math.round(
+        data.settings.blend * 100,
+      );
+      if (data.workingFloor !== undefined) {
+        buildingFloors = getFloors().floors;
+        if (floorWork.has(data.workingFloor)) selectFloor(data.workingFloor);
+        else workingFloor = data.workingFloor;
+      }
+    },
     getPlacedColumns(index) {
       const placed =
         index === workingFloor ? columns : floorWork.get(index)?.columns;

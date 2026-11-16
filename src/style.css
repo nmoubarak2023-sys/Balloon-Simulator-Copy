@@ -1323,12 +1323,12 @@ footer {
   width: auto;
   min-width: 110px;
 }
-.floor-toolbar :is(#vFloorVisibility, #cFloorVisibility) {
+.floor-toolbar :is(#vFloorVisibility, #cFloorVisibility, #wall-cFloorVisibility) {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
 }
-.floor-toolbar :is(#vFloorVisibility, #cFloorVisibility) label {
+.floor-toolbar :is(#vFloorVisibility, #cFloorVisibility, #wall-cFloorVisibility) label {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1576,4 +1576,12 @@ input.section-degree-entry[type="number"] {
 }
 .voronoi-operation-dock > .canvas-tools {
   border-bottom: 0;
+}
+
+.autosave-status {
+  display: block;
+  color: #91aaad;
+  padding: 0.4rem 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
 }

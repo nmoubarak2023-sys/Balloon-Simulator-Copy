@@ -1,4 +1,5 @@
 import { initMeasure } from "./voronoi-measure.js";
+import { queueAutosave } from "./autosave.js";
 import { initRealistic } from "./realistic-ui.js";
 import { initFacade } from "./facade-ui.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
@@ -36,7 +37,7 @@ export function initVoronoi(
   nav.className = "simulation-tabs";
   nav.setAttribute("aria-label", "Simulation workspaces");
   nav.innerHTML =
-    '<button aria-pressed="true">VORONOI BALLOONS</button><button aria-pressed="false">COLUMN POPulate</button><button aria-pressed="false" aria-controls="realisticWorkspace">REALISTIC MODE</button><button aria-pressed="false" aria-controls="facadeWorkspace">FACADE DESIGN</button>';
+    '<button aria-pressed="true">VORONOI BALLOONS</button><button aria-pressed="false">COLUMN POPulate</button><button aria-pressed="false" aria-controls="wallWorkspace">WALL POPulate</button><button aria-pressed="false" aria-controls="realisticWorkspace">REALISTIC MODE</button><button aria-pressed="false" aria-controls="facadeWorkspace">FACADE DESIGN</button>';
   existing.before(nav);
   const facade = document.createElement("main");
   facade.id = "facadeWorkspace";
@@ -766,6 +767,10 @@ export function initVoronoi(
     const entry = journal.pop();
     $("vUndo").disabled = !journal.length;
     if (!entry) return;
+    restoreWorkspace(entry);
+    $("vStatus").textContent = "Last workspace action undone.";
+  }
+  function restoreWorkspace(entry) {
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -791,7 +796,6 @@ export function initVoronoi(
     orbit.target.fromArray(state.orbitTarget);
     orbit.update();
     updateFloorReport();
-    $("vStatus").textContent = "Last workspace action undone.";
   }
   $("vUndo").onclick = undo;
   window.addEventListener("keydown", (event) => {
@@ -1813,6 +1817,7 @@ export function initVoronoi(
         : result.closed && result.components === 1
           ? "One connected closed enclosure · 0 naked edges · 0 non-manifold edges"
           : `${result.components} component(s) · ${q.boundaryEdges} naked edges · ${q.nonManifoldEdges} non-manifold edges. Review the mesh report.`;
+      queueAutosave();
       if (JSON.stringify(parameters()) !== JSON.stringify(result.params))
         generate();
     };
@@ -2082,6 +2087,7 @@ export function initVoronoi(
       $("vIsolateZone").checked = false;
       setPending(false);
       restoreFloor(floorState[activeFloor].snapshot);
+      queueAutosave();
       $("vStatus").textContent =
         `All zones populated across ${targets.length} loaded floor(s). Existing edits retained.`;
     } catch (e) {
@@ -2332,41 +2338,47 @@ export function initVoronoi(
     },
     thumbnail: () => canvasThumbnail(renderers[0], scene, camera),
   });
-  const columns = initColumns(
-    rhino,
-    (index) => {
-      const enclosure =
-        index === activeFloor ? result : floorState[index]?.snapshot?.result;
-      if (!enclosure?.raw?.indices.length)
-        throw Error(
-          "Generate the enclosure for Floor " +
-            (index + 1) +
-            " in Voronoi Balloons first.",
-        );
-      return enclosure;
-    },
-    () => ({
-      active: activeFloor,
-      floors: floorState.map((floor, index) => {
-        const current = index === activeFloor;
-        const outline = current ? boundary : floor.snapshot?.params?.boundary;
-        const enclosure = current ? result : floor.snapshot?.result;
-        return {
-          index,
-          name: floor.name,
-          raw: enclosure?.raw,
-          perimeter: outline?.perimeter,
-          elevation: outline?.elevation ?? 0,
-        };
-      }),
+  const getFloorEnclosure = (index) => {
+    const enclosure =
+      index === activeFloor ? result : floorState[index]?.snapshot?.result;
+    if (!enclosure?.raw?.indices.length)
+      throw Error(
+        "Generate the enclosure for Floor " +
+          (index + 1) +
+          " in Voronoi Balloons first.",
+      );
+    return enclosure;
+  };
+  const getSupportFloors = () => ({
+    active: activeFloor,
+    floors: floorState.map((floor, index) => {
+      const current = index === activeFloor;
+      const outline = current ? boundary : floor.snapshot?.params?.boundary;
+      const enclosure = current ? result : floor.snapshot?.result;
+      return {
+        index,
+        name: floor.name,
+        raw: enclosure?.raw,
+        perimeter: outline?.perimeter,
+        zones: outline?.zones,
+        elevation: outline?.elevation ?? 0,
+      };
     }),
-  );
+  });
+  const columns = initColumns(rhino, getFloorEnclosure, getSupportFloors);
+  const walls = initColumns(rhino, getFloorEnclosure, getSupportFloors, {
+    walls: true,
+  });
+  columns.pane.after(walls.pane);
   const showRealistic = initRealistic(realistic, () =>
     floorState.flatMap((floor, index) => {
       const current = index === activeFloor;
       const outline = current ? boundary : floor.snapshot?.params?.boundary;
       const enclosure = current ? result : floor.snapshot?.result;
-      const placedColumns = columns.getPlacedColumns(index);
+      const placedColumns = [
+        ...columns.getPlacedColumns(index),
+        ...walls.getPlacedColumns(index),
+      ];
       if (!outline && !enclosure?.raw?.indices.length && !placedColumns.length)
         return [];
       const elevation = outline?.elevation ?? enclosure?.params.floor ?? 0;
@@ -2420,11 +2432,13 @@ export function initVoronoi(
         pane.hidden = i !== 0;
         party.pane.hidden = true;
         columns.pane.hidden = i !== 1;
+        walls.pane.hidden = i !== 2;
         document.querySelector(".header-actions").hidden = existing.hidden;
         [...nav.children].forEach((b, j) =>
           b.setAttribute("aria-pressed", i === j),
         );
         if (i === 1) columns.show();
+        if (i === 2) walls.show();
         if (i === 0) {
           resize();
           if (!result && !pending) draw();
@@ -2528,5 +2542,29 @@ export function initVoronoi(
   frame();
   zoneUI();
   nav.children[0].click();
-  return {};
+  return {
+    save: () => ({
+      building: captureUndo(),
+      measurement: measure.save(),
+      labels: $("vZoneLabels").checked,
+      tab: Array.from(nav.children).findIndex(
+        (button) => button.getAttribute("aria-pressed") === "true",
+      ),
+      columns: columns.saveSession(),
+      walls: walls.saveSession(),
+      realistic: showRealistic.saveSession(),
+      facade: showFacade.saveSession(),
+    }),
+    load(data) {
+      restoreWorkspace(data.building);
+      measure.load(data.measurement);
+      $("vZoneLabels").checked = data.labels;
+      $("vZoneLabels").onchange();
+      columns.loadSession(data.columns);
+      walls.loadSession(data.walls);
+      showRealistic.loadSession(data.realistic);
+      showFacade.loadSession(data.facade);
+      nav.children[data.tab]?.click();
+    },
+  };
 }

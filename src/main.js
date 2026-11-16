@@ -3,6 +3,7 @@ import { mountGeometryLibrary, canvasThumbnail } from "./geometry-library.js";
 import { quadObj, quadMesh } from "./quad-mesh.js";
 import "./style.css";
 import { initBalloonParty } from "./party.js";
+import { queueAutosave, startAutosave } from "./autosave.js";
 import { initVoronoi } from "./voronoi-ui.js";
 import * as T from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
@@ -168,12 +169,12 @@ async function task(message, fn) {
   $("cancelBtn").hidden = false;
   $("progress").value = 0;
   document
+    .querySelector("main")
     .querySelectorAll(
       ".controls button,.controls input,.controls select,.canvas-tools button,.balloon-actions button,.balloon-actions input,.rotation-controls button,.rotation-controls input,.rotation-controls select,#curveEditBtn",
     )
     .forEach((e) => {
-      if (!e.closest("#voronoiWorkspace,#partyWorkspace,#columnWorkspace"))
-        e.disabled = true;
+      e.disabled = true;
     });
   status(message);
   try {
@@ -183,16 +184,17 @@ async function task(message, fn) {
     status(e.message, true);
   } finally {
     busy = false;
+    if (succeeded) queueAutosave();
     view.setBusy(false);
     $("progress").hidden = true;
     $("cancelBtn").hidden = true;
     document
+      .querySelector("main")
       .querySelectorAll(
         ".controls button,.controls input,.controls select,.canvas-tools button,.balloon-actions button,.balloon-actions input,.rotation-controls button,.rotation-controls input,.rotation-controls select,#curveEditBtn",
       )
       .forEach((e) => {
-        if (!e.closest("#voronoiWorkspace,#partyWorkspace,#columnWorkspace"))
-          e.disabled = false;
+        e.disabled = false;
       });
     updateActionButtons();
     $("addCurve").disabled = curves.length >= 5;
@@ -1497,7 +1499,7 @@ $("cancelBtn").onclick = () => {
 };
 $("helpBtn").onclick = () => $("help").showModal();
 $("closeHelp").onclick = () => $("help").close();
-mountGeometryLibrary({
+const balloonBuildLibrary = {
   workspace: "balloon-build",
   container: document.querySelector(".control-scroll"),
   save: () => {
@@ -1549,7 +1551,8 @@ mountGeometryLibrary({
   },
   thumbnail: () =>
     canvasThumbnail(view.renderers[0], view.scene, view.perspective),
-});
+};
+mountGeometryLibrary(balloonBuildLibrary);
 newWorker();
 const party = initBalloonParty(rhino);
 const partySend = document.createElement("div");
@@ -1601,3 +1604,11 @@ const workspaces = initVoronoi(
   },
 );
 demo();
+void startAutosave({
+  workspace: workspaces,
+  build: {
+    save: () => (busy || !display ? undefined : balloonBuildLibrary.save()),
+    load: balloonBuildLibrary.load,
+  },
+  party: { save: party.saveSession, load: party.loadSession },
+});

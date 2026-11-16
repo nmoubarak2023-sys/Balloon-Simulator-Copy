@@ -275,10 +275,8 @@ export function initRealistic(pane, getFloors) {
     history.push(before);
     $("realUndo").disabled = false;
   }
-  function undo() {
+  function applyState(before) {
     if (gumball?.dragging || figureControl?.dragging) return;
-    const before = history.pop();
-    if (!before) return;
     leaveEyeView();
     selectFigure(undefined);
     scaleFigures.clear();
@@ -286,8 +284,10 @@ export function initRealistic(pane, getFloors) {
     figurePositions.forEach(addFigure);
     pivot.position.fromArray(before.position);
     pivot.quaternion.fromArray(before.rotation);
-    setMode(before.mode);
-    setSection(before.sectionOn && !!mesh);
+    if (gumball) {
+      setMode(before.mode);
+      setSection(before.sectionOn);
+    }
     ["realShell", "realSlab"].forEach((id, index) => {
       $(id).value = before.thickness[index];
       $(id + "Value").textContent = $(id).value + " FT";
@@ -296,6 +296,11 @@ export function initRealistic(pane, getFloors) {
     failedKey = undefined;
     $("realUndo").disabled = !history.length;
     refresh();
+  }
+  function undo() {
+    if (gumball?.dragging || figureControl?.dragging) return;
+    const before = history.pop();
+    if (before) applyState(before);
   }
   function removeObject(object) {
     if (!object) return;
@@ -743,9 +748,31 @@ export function initRealistic(pane, getFloors) {
     inFlight = undefined;
     status("Processing cancelled. Change thickness to rebuild.");
   });
-  return () => {
+  let restored;
+  function show() {
     openRenderer();
     resize();
+    if (restored) {
+      const state = restored;
+      restored = undefined;
+      applyState(state);
+      fitted = !!state.camera;
+      if (state.camera) {
+        camera.position.fromArray(state.camera);
+        orbit.target.fromArray(state.target);
+        orbit.update();
+      }
+    }
     refresh();
+  }
+  show.saveSession = () =>
+    restored ?? {
+      ...readState(),
+      camera: fitted ? camera.position.toArray() : null,
+      target: fitted ? orbit.target.toArray() : null,
+    };
+  show.loadSession = (data) => {
+    restored = data;
   };
+  return show;
 }

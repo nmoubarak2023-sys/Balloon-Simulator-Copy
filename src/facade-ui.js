@@ -1,3 +1,4 @@
+import { queueAutosave } from "./autosave.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import * as T from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -157,6 +158,7 @@ export function initFacade(pane, readFloors, rhino) {
       $("fStage").value = stage;
       display();
       if (stage === "wrap") fit();
+      queueAutosave();
     };
     try {
       worker ??= new Worker(new URL("./facade-worker.js", import.meta.url), {
@@ -289,7 +291,9 @@ export function initFacade(pane, readFloors, rhino) {
       $("fStatus").textContent = error.message;
     }
   };
-  return () => {
+  const fields = ["fOffset", "fResolution", "fTarget", "fStage", "fFinish"];
+  let restoredCamera;
+  function show() {
     if (!renderer) {
       renderer = new T.WebGLRenderer({ antialias: true });
       renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -303,6 +307,38 @@ export function initFacade(pane, readFloors, rhino) {
       orbit.addEventListener("change", render);
       new ResizeObserver(resize).observe($("fCanvas"));
     }
+    if (restoredCamera) {
+      camera.position.fromArray(restoredCamera.position);
+      orbit.target.fromArray(restoredCamera.target);
+      orbit.update();
+      restoredCamera = undefined;
+    }
     resize();
+  }
+  show.saveSession = () => ({
+    stages,
+    showEdges,
+    fields: fields.map((id) => $(id).value),
+    camera:
+      restoredCamera ??
+      (orbit && {
+        position: camera.position.toArray(),
+        target: orbit.target.toArray(),
+      }),
+  });
+  show.loadSession = (data) => {
+    if (!data) return;
+    Object.assign(stages, data.stages);
+    Object.assign(showEdges, data.showEdges);
+    fields.forEach((id, index) => {
+      $(id).value = data.fields[index];
+    });
+    restoredCamera = data.camera;
+    controls();
+    if (stages.wrap)
+      $("fOriginalCount").textContent =
+        "Original wrap: " + stages.wrap.indices.length / 3 + " triangles";
+    display();
   };
+  return show;
 }
