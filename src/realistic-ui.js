@@ -521,6 +521,8 @@ export function initRealistic(pane, getFloors) {
         floor.elevation,
         floor.floor,
         floor.columns.map(idOf),
+        floor.wallCount,
+        floor.booleanCutters,
       ]),
     ]);
     return { kind: "build", key, floors, shellThickness, slabThickness };
@@ -765,6 +767,13 @@ export function initRealistic(pane, getFloors) {
     }
     refresh();
   }
+  show.processView = () => ({
+    camera,
+    orbit,
+    roots: [mesh, cap, scaleFigures],
+    workspace: "REALISTIC MODE",
+  });
+  show.isBusy = () => !!inFlight;
   show.saveSession = () =>
     restored ?? {
       ...readState(),

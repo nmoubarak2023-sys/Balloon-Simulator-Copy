@@ -315,6 +315,13 @@ export function initFacade(pane, readFloors, rhino) {
     }
     resize();
   }
+  show.processView = () => ({
+    camera,
+    orbit,
+    roots: [mesh],
+    workspace: "FACADE DESIGN",
+  });
+  show.isBusy = () => busy;
   show.saveSession = () => ({
     stages,
     showEdges,

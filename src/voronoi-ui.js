@@ -1,7 +1,7 @@
+import { initBoolean } from "./boolean-ui.js";
 import { initMeasure } from "./voronoi-measure.js";
 import { queueAutosave } from "./autosave.js";
 import { initRealistic } from "./realistic-ui.js";
-import { initFacade } from "./facade-ui.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
@@ -37,15 +37,12 @@ export function initVoronoi(
   nav.className = "simulation-tabs";
   nav.setAttribute("aria-label", "Simulation workspaces");
   nav.innerHTML =
-    '<button aria-pressed="true">VORONOI BALLOONS</button><button aria-pressed="false">COLUMN POPulate</button><button aria-pressed="false" aria-controls="wallWorkspace">WALL POPulate</button><button aria-pressed="false" aria-controls="realisticWorkspace">REALISTIC MODE</button><button aria-pressed="false" aria-controls="facadeWorkspace">FACADE DESIGN</button>';
+    '<button aria-pressed="true">VORONOI BALLOONS</button><button aria-pressed="false" aria-controls="booleanWorkspace">BOOLEAN</button><button aria-pressed="false">COLUMN POPulate</button><button aria-pressed="false" aria-controls="wallWorkspace">WALL POPulate</button><button aria-pressed="false" aria-controls="realisticWorkspace">REALISTIC MODE</button>';
   existing.before(nav);
-  const facade = document.createElement("main");
-  facade.id = "facadeWorkspace";
-  facade.hidden = true;
   const realistic = document.createElement("main");
   realistic.id = "realisticWorkspace";
   realistic.hidden = true;
-  existing.after(pane, realistic, facade);
+  existing.after(pane, realistic);
   const fields = [
     ["count", "Seed point count", 40, 1, 150, 1],
     ["seed", "Point seed", 42, 0, 9999, 1],
@@ -204,6 +201,80 @@ export function initVoronoi(
   $("vShowAllZones").onchange = () => {
     showAllZones = $("vShowAllZones").checked;
     draw();
+  };
+  const repairZones = document.createElement("button");
+  repairZones.id = "vRepairZones";
+  repairZones.textContent = "REPAIR ZONES";
+  $("vBoundaryFile").before(repairZones);
+  repairZones.onclick = async () => {
+    if (pending || backgroundTasks || !boundary) {
+      $("vStatus").textContent = boundary
+        ? "Wait for the current operation to finish."
+        : "Import floor curves first.";
+      return;
+    }
+    const before = captureUndo();
+    const partitionWorker = workerFactory();
+    let cancel;
+    backgroundTasks++;
+    updateLoading();
+    repairZones.disabled = true;
+    try {
+      const next = await new Promise((resolve, reject) => {
+        cancel = () => reject(Error("Zone repair cancelled."));
+        cancellations.add(cancel);
+        partitionWorker.onmessage = ({ data }) =>
+          data.error ? reject(Error(data.error)) : resolve(data.result);
+        partitionWorker.onerror = (event) => reject(Error(event.message));
+        partitionWorker.postMessage({
+          id: 1,
+          action: "partitionZones",
+          curves: [
+            { closed: true, points: boundary.perimeter },
+            ...boundary.dividers,
+          ],
+          options: {
+            elevation: boundary.elevation,
+            sourceName: boundary.sourceName,
+          },
+        });
+      });
+      const previousCount = boundary.zones.length;
+      if (
+        JSON.stringify(next.zones.map((zone) => zone.loops)) ===
+        JSON.stringify(boundary.zones.map((zone) => zone.loops))
+      ) {
+        $("vStatus").textContent =
+          "Zone detection is up to date. " + previousCount + " zones found.";
+        return;
+      }
+      // Repartitioning changes balloon zone IDs. Keep the complete previous
+      // floor in undo before preparing its new boundaries.
+      journal.push(before);
+      $("vUndo").disabled = false;
+      await importBoundary(next);
+      fitNext = false;
+      showAllZones = true;
+      isolateZone = false;
+      $("vIsolateZone").checked = false;
+      zoneUI();
+      draw();
+      $("vProjectMessage").textContent =
+        "Repaired editing floor: " +
+        previousCount +
+        " → " +
+        next.zones.length +
+        " zones. Populate the repaired zones to regenerate balloons. Undo restores the previous floor.";
+      queueAutosave();
+    } catch (error) {
+      $("vStatus").textContent = error.message;
+    } finally {
+      cancellations.delete(cancel);
+      partitionWorker.terminate();
+      repairZones.disabled = false;
+      backgroundTasks--;
+      updateLoading();
+    }
   };
   async function importBoundary(next) {
     if (pending)
@@ -393,6 +464,7 @@ export function initVoronoi(
   floorControls
     .querySelector("strong")
     .after(pane.querySelector('label[for="vBoundaryFile"]'));
+  floorControls.querySelector('label[for="vBoundaryFile"]').after(repairZones);
   pane.querySelector(".voro-layout").before(floorControls);
   function floorUI() {
     $("vFloor").replaceChildren(
@@ -2347,7 +2419,7 @@ export function initVoronoi(
           (index + 1) +
           " in Voronoi Balloons first.",
       );
-    return enclosure;
+    return boolean.resolve(index, enclosure);
   };
   const getSupportFloors = () => ({
     active: activeFloor,
@@ -2365,6 +2437,25 @@ export function initVoronoi(
       };
     }),
   });
+  const boolean = initBoolean(
+    () =>
+      floorState.map((floor, index) => {
+        const current = index === activeFloor;
+        const outline = current ? boundary : floor.snapshot?.params?.boundary;
+        const enclosure = current ? result : floor.snapshot?.result;
+        return {
+          index,
+          name: floor.name,
+          perimeter: outline?.perimeter,
+          elevation: outline?.elevation ?? enclosure?.params.floor ?? 0,
+          raw: enclosure?.raw,
+          columns: columns.getPlacedColumns(index),
+          walls: walls.getPlacedColumns(index),
+        };
+      }),
+    rhino,
+  );
+  pane.after(boolean.pane);
   const columns = initColumns(rhino, getFloorEnclosure, getSupportFloors);
   const walls = initColumns(rhino, getFloorEnclosure, getSupportFloors, {
     walls: true,
@@ -2391,39 +2482,15 @@ export function initVoronoi(
           perimeter: outline?.perimeter,
           raw: enclosure?.raw,
           columns: placedColumns,
+          wallCount: walls.getPlacedColumns(index).length,
+          booleanCutters: boolean.cutters(),
         },
       ];
     }),
   );
-  const showFacade = initFacade(
-    facade,
-    () => {
-      if (pending || backgroundTasks)
-        throw Error("Wait for Voronoi to finish processing.");
-      return floorState
-        .flatMap((floor, index) => {
-          const current = index === activeFloor;
-          const source = current ? boundary : floor.snapshot?.params.boundary;
-          if (!source) return [];
-          return [
-            {
-              loop: source.perimeter,
-              z: source.elevation ?? 0,
-              raw: (current ? result : floor.snapshot?.result)?.raw,
-            },
-          ];
-        })
-        .sort((a, b) => a.z - b.z);
-    },
-    rhino,
-  );
   [...nav.children].forEach(
     (button, i) =>
       (button.onclick = () => {
-        const facadeSelected =
-          button.getAttribute("aria-controls") === facade.id;
-        facade.hidden = !facadeSelected;
-        if (facadeSelected) showFacade();
         const realisticSelected =
           button.getAttribute("aria-controls") === realistic.id;
         realistic.hidden = !realisticSelected;
@@ -2431,14 +2498,16 @@ export function initVoronoi(
         existing.hidden = true;
         pane.hidden = i !== 0;
         party.pane.hidden = true;
-        columns.pane.hidden = i !== 1;
-        walls.pane.hidden = i !== 2;
+        boolean.pane.hidden = i !== 1;
+        columns.pane.hidden = i !== 2;
+        walls.pane.hidden = i !== 3;
         document.querySelector(".header-actions").hidden = existing.hidden;
         [...nav.children].forEach((b, j) =>
           b.setAttribute("aria-pressed", i === j),
         );
-        if (i === 1) columns.show();
-        if (i === 2) walls.show();
+        if (i === 1) boolean.show();
+        if (i === 2) columns.show();
+        if (i === 3) walls.show();
         if (i === 0) {
           resize();
           if (!result && !pending) draw();
@@ -2543,6 +2612,23 @@ export function initVoronoi(
   zoneUI();
   nav.children[0].click();
   return {
+    isBusy: () =>
+      pending ||
+      backgroundTasks > 0 ||
+      boolean.isBusy() ||
+      (!realistic.hidden && showRealistic.isBusy()),
+    processView() {
+      if (!boolean.pane.hidden) return boolean.processView();
+      if (!columns.pane.hidden) return columns.processView();
+      if (!walls.pane.hidden) return walls.processView();
+      if (!realistic.hidden) return showRealistic.processView();
+      return {
+        camera,
+        orbit,
+        roots: [group, sectionCuts],
+        workspace: "VORONOI BALLOONS",
+      };
+    },
     save: () => ({
       building: captureUndo(),
       measurement: measure.save(),
@@ -2550,21 +2636,22 @@ export function initVoronoi(
       tab: Array.from(nav.children).findIndex(
         (button) => button.getAttribute("aria-pressed") === "true",
       ),
+      boolean: boolean.saveSession(),
       columns: columns.saveSession(),
       walls: walls.saveSession(),
       realistic: showRealistic.saveSession(),
-      facade: showFacade.saveSession(),
     }),
     load(data) {
       restoreWorkspace(data.building);
       measure.load(data.measurement);
       $("vZoneLabels").checked = data.labels;
       $("vZoneLabels").onchange();
+      boolean.loadSession(data.boolean);
       columns.loadSession(data.columns);
       walls.loadSession(data.walls);
       showRealistic.loadSession(data.realistic);
-      showFacade.loadSession(data.facade);
-      nav.children[data.tab]?.click();
+      const tab = data.boolean ? data.tab : data.tab > 0 ? data.tab + 1 : 0;
+      (nav.children[tab] ?? nav.children[0]).click();
     },
   };
 }

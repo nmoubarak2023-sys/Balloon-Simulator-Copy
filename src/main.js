@@ -1,3 +1,4 @@
+import { initProcess } from "./process-ui.js";
 import { scaleAxisEdit } from "./balloon-edit.js";
 import { mountGeometryLibrary, canvasThumbnail } from "./geometry-library.js";
 import { quadObj, quadMesh } from "./quad-mesh.js";
@@ -1604,6 +1605,7 @@ const workspaces = initVoronoi(
   },
 );
 demo();
+const buildProcess = initProcess(workspaces);
 void startAutosave({
   workspace: workspaces,
   build: {
@@ -1611,4 +1613,5 @@ void startAutosave({
     load: balloonBuildLibrary.load,
   },
   party: { save: party.saveSession, load: party.loadSession },
+  process: { save: buildProcess.save, load: buildProcess.load },
 });

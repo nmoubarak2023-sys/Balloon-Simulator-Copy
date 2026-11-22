@@ -261,6 +261,7 @@ export function meshQuality(raw) {
   let invalidFaces = 0,
     duplicateFaces = 0,
     degenerateFaces = 0,
+    tinyFaces = 0,
     maxAspect = 0,
     stretchedFaces = 0,
     longestEdge = 0;
@@ -290,7 +291,14 @@ export function meshQuality(raw) {
     seen.add(id);
     const f = face(p, t),
       aspect = f.quality ? 1 / f.quality : Infinity;
-    if (f.doubleArea <= areaFloor || new Set(t).size < 3) degenerateFaces++;
+    if (f.doubleArea <= areaFloor) tinyFaces++;
+    // Degeneracy depends on the face's own arithmetic scale. Using the whole
+    // building span rejects valid small intersection faces on large projects.
+    const faceRoundoff = Math.max(
+      Number.MIN_VALUE,
+      f.longest * f.longest * Number.EPSILON * 64,
+    );
+    if (f.doubleArea <= faceRoundoff || new Set(t).size < 3) degenerateFaces++;
     maxAspect = Math.max(maxAspect, aspect);
     longestEdge = Math.max(longestEdge, f.longest);
     if (aspect > 20) stretchedFaces++;
@@ -310,6 +318,7 @@ export function meshQuality(raw) {
     invalidFaces,
     duplicateFaces,
     degenerateFaces,
+    tinyFaces,
     boundaryEdges,
     nonManifoldEdges,
     inconsistentEdges,

@@ -49,6 +49,10 @@ export function partitionCurves(
       )
     )
       throw Error("Invalid boundary curve coordinates.");
+  curves = curves.map((curve) => ({
+    ...curve,
+    points: curve.points.map((point) => point.slice()),
+  }));
   const closed = curves
     .filter((c) => c.closed && c.points.length >= 3)
     .sort(
@@ -65,6 +69,61 @@ export function partitionCurves(
     throw Error("The perimeter has no usable area.");
   const tol =
     tolerance ?? Math.max(1e-6, Math.max(bounds.width, bounds.height) * 1e-6);
+  if (!Number.isFinite(tol) || tol <= 0)
+    throw Error("Invalid curve tolerance.");
+  const repairDistance = Math.max(
+    tol,
+    Math.min(
+      0.25,
+      Math.max(0.05, Math.max(bounds.width, bounds.height) * 0.001),
+    ),
+  );
+  let repairs = 0;
+  // Repair drafting gaps at divider endpoints, keeping the triangulation
+  // tolerance small so nearby, intentional boundaries remain distinct.
+  for (const curve of curves) {
+    if (curve.closed) continue;
+    for (const index of [0, curve.points.length - 1]) {
+      const point = curve.points[index];
+      let best,
+        onPerimeter = false,
+        distance = repairDistance;
+      for (const other of curves) {
+        if (other === curve) continue;
+        if (onPerimeter && other !== closed[0]) continue;
+        for (let i = 0; i < other.points.length - (other.closed ? 0 : 1); i++) {
+          const a = other.points[i],
+            b = other.points[(i + 1) % other.points.length];
+          const dx = b[0] - a[0],
+            dy = b[1] - a[1];
+          const length = dx * dx + dy * dy;
+          if (!length) continue;
+          const t = Math.max(
+            0,
+            Math.min(
+              1,
+              ((point[0] - a[0]) * dx + (point[1] - a[1]) * dy) / length,
+            ),
+          );
+          const target = [a[0] + t * dx, a[1] + t * dy];
+          const gap = Math.hypot(...sub(target, point));
+          const perimeterTarget = other === closed[0];
+          if (
+            gap < distance ||
+            (perimeterTarget && !onPerimeter && gap <= repairDistance)
+          ) {
+            best = target;
+            distance = gap;
+            onPerimeter = perimeterTarget;
+          }
+        }
+      }
+      if (best && distance > tol) {
+        curve.points[index] = best;
+        repairs++;
+      }
+    }
+  }
   const segs = [];
   for (const c of curves) {
     const p = c.points;
@@ -257,7 +316,9 @@ export function partitionCurves(
     }
   }
   if (zones.length > 20)
-    throw Error(`Detected ${zones.length} zones. Use no more than 20 zones per perimeter.`);
+    throw Error(
+      `Detected ${zones.length} zones. Use no more than 20 zones per perimeter.`,
+    );
   return {
     perimeter,
     dividers: curves
@@ -269,13 +330,18 @@ export function partitionCurves(
     tolerance: tol,
     sourceName,
     units: "feet",
-    warnings: fragmentWarning
-      ? [fragmentWarning]
-      : curves.length > 1 && zones.length === 1
-        ? [
-            "Divider curves do not close any zones. Snap their endpoints to the perimeter or to another divider in Rhino.",
-          ]
-        : [],
+    warnings: [
+      ...(repairs
+        ? [`Connected ${repairs} small divider gaps automatically.`]
+        : []),
+      ...(fragmentWarning
+        ? [fragmentWarning]
+        : curves.length > 1 && zones.length === 1
+          ? [
+              "Divider curves do not close any zones. Snap their endpoints to the perimeter or to another divider in Rhino.",
+            ]
+          : []),
+    ],
   };
 }
 export function demoBoundary() {

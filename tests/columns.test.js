@@ -202,3 +202,91 @@ test("collision search recovers a seam missed by coarse roof vertices", () => {
   assert.ok(Math.abs(seam.x) < 0.001);
   assert.equal(seam.z, height);
 });
+
+// Covers the Boolean-to-support handoff, not just isolated mesh generators.
+test("Boolean support handoff keeps native ridges, excludes voids and builds both support types", async () => {
+  const { booleanFloors } = await import("../src/boolean-model.js");
+  const { findSupportSites, checkSupport, segmentHitsVoid } =
+    await import("../src/boolean-supports.js");
+  const { wallMesh } = await import("../src/walls.js");
+  const native = collisionSites(result);
+  const anchor = native[0];
+  const cutter = {
+    enabled: true,
+    mode: "void",
+    floors: [0],
+    targets: ["vaults", "columns", "walls"],
+    position: [anchor.x, anchor.y, 10],
+    size: [8, 8, 50],
+    rotation: [0, 0, 0],
+    quality: 48,
+    thickness: 1,
+    offset: "outward",
+  };
+  const cut = booleanFloors(
+    m,
+    [{ index: 0, name: "TEST", raw: result.raw }],
+    [cutter],
+    1,
+  )[0];
+  const source = {
+    ...result,
+    raw: cut.raw,
+    collisionRaw: result.raw,
+    booleanFloor: 0,
+    booleanCutters: [cutter],
+  };
+  const sites = findSupportSites(source);
+  assert.ok(sites.length > 0);
+  assert.ok(
+    sites.every((site) =>
+      native.some(
+        (original) =>
+          original.id === site.id &&
+          original.x === site.x &&
+          original.y === site.y,
+      ),
+    ),
+  );
+  assert.ok(
+    sites.every(
+      (site) =>
+        !segmentHitsVoid(
+          [site.x, site.y, params.floor],
+          [site.x, site.y, site.z],
+          cutter,
+        ),
+    ),
+  );
+  assert.ok(sites.every((site) => site.z - params.floor >= 0.5));
+  for (const walls of [false, true]) {
+    let built = false;
+    for (const site of findSupportSites(source, walls)) {
+      try {
+        const raw = checkSupport(
+          (walls ? wallMesh : columnMesh)(source, site, {
+            radius: 0.5,
+            bottomRadius: 0.5,
+            flare: 3,
+            blend: 0.55,
+          }),
+          source,
+          walls,
+        );
+        const q = meshQuality(raw);
+        assert.equal(q.boundaryEdges, 0);
+        assert.equal(q.nonManifoldEdges, 0);
+        built = true;
+        break;
+      } catch (error) {
+        if (error.code === "ERR_ASSERTION") throw error;
+      }
+    }
+    assert.ok(
+      built,
+      walls
+        ? "a wall can be placed after Boolean"
+        : "a column can be placed after Boolean",
+    );
+  }
+});

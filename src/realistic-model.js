@@ -1,6 +1,7 @@
 import * as T from "three";
 import { MeshBVH } from "three-mesh-bvh";
 import { facadeMesh } from "./facade-wrap.js";
+import { subtractCutters, retainedShell } from "./boolean-model.js";
 
 function nativeMesh(m, raw, origin) {
   return new m.Manifold(
@@ -90,34 +91,68 @@ export function realisticBuilding(m, floors, slabThickness) {
     const rooms = floors.flatMap((floor) => (floor.room ? [floor.room] : []));
     const solids = [];
     if (rooms.length) {
-      const outside = own(m.Manifold.union(rooms.map((room) => room.outside)));
       const inside = own(m.Manifold.union(rooms.map((room) => room.inside)));
-      solids.push(own(outside.subtract(inside)));
+      for (const floor of floors) {
+        if (!floor.room) continue;
+        const shell = own(floor.room.outside.subtract(inside));
+        const cut = subtractCutters(
+          m,
+          shell,
+          floor.booleanCutters ?? [],
+          floor.index,
+          "vaults",
+        );
+        solids.push(cut === shell ? shell : own(cut));
+      }
     }
     for (const floor of floors) {
       if (floor.perimeter?.length >= 3) {
         const outline = own(new m.CrossSection([floor.perimeter], "EvenOdd"));
-        if (!outline.isEmpty())
-          solids.push(
-            own(
-              own(outline.extrude(slabThickness)).translate([
-                0,
-                0,
-                floor.elevation - slabThickness,
-              ]),
-            ),
+        if (!outline.isEmpty()) {
+          const slab = own(
+            own(outline.extrude(slabThickness)).translate([
+              0,
+              0,
+              floor.elevation - slabThickness,
+            ]),
           );
+          const cut = subtractCutters(
+            m,
+            slab,
+            floor.booleanCutters ?? [],
+            floor.index,
+            "slabs",
+          );
+          solids.push(cut === slab ? slab : own(cut));
+        }
       }
-      for (const raw of floor.columns) {
+      for (const [index, raw] of floor.columns.entries()) {
         const origin = Array.from(raw.positions.slice(0, 3));
         const column = own(nativeMesh(m, raw, origin));
         if (column.status() !== "NoError")
           throw Error(
             "A column mesh is not closed. Check it in Column POPulate.",
           );
-        if (!column.isEmpty()) solids.push(own(column.translate(origin)));
+        if (!column.isEmpty()) {
+          const placed = own(column.translate(origin));
+          const target =
+            index >= floor.columns.length - (floor.wallCount ?? 0)
+              ? "walls"
+              : "columns";
+          const cut = subtractCutters(
+            m,
+            placed,
+            floor.booleanCutters ?? [],
+            floor.index,
+            target,
+          );
+          solids.push(cut === placed ? placed : own(cut));
+        }
       }
     }
+    for (const cutter of floors[0]?.booleanCutters ?? [])
+      if (cutter.enabled && cutter.mode === "shell")
+        solids.push(own(retainedShell(m, cutter)));
     const building = m.Manifold.union(solids);
     if (building.status() !== "NoError") {
       building.delete();

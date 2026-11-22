@@ -20,6 +20,97 @@ const outer = {
     [0, 10],
   ],
 };
+
+test("small drafting gaps and short overshoots connect divider endpoints without changing the source curves", () => {
+  const curves = [
+    outer,
+    {
+      points: [
+        [0.02, 5],
+        [10.02, 5],
+      ],
+    },
+    {
+      points: [
+        [5, 0.02],
+        [5, 4.98],
+      ],
+    },
+  ];
+  const original = structuredClone(curves);
+  const boundary = partitionCurves(curves);
+  assert.equal(boundary.zones.length, 3);
+  assert.ok(
+    Math.abs(boundary.zones.reduce((sum, zone) => sum + zone.area, 0) - 100) <
+      1e-8,
+  );
+  assert.deepEqual(curves, original);
+  for (const point of [
+    [2, 2],
+    [8, 2],
+    [5, 8],
+  ])
+    assert.equal(
+      boundary.zones.filter((zone) => inLoops(point, zone.loops)).length,
+      1,
+    );
+  assert.match(boundary.warnings.join(" "), /automatically/);
+});
+
+test("endpoint repair retains narrow neighboring zones and larger intentional gaps", () => {
+  const narrow = partitionCurves([
+    outer,
+    {
+      points: [
+        [4.99, 0],
+        [4.99, 10],
+      ],
+    },
+    {
+      points: [
+        [5.01, 0],
+        [5.01, 10],
+      ],
+    },
+  ]);
+  assert.equal(narrow.zones.length, 3);
+  assert.ok(
+    Math.abs(Math.min(...narrow.zones.map((zone) => zone.area)) - 0.2) < 1e-8,
+  );
+  const open = partitionCurves([
+    outer,
+    {
+      points: [
+        [0.5, 5],
+        [9.5, 5],
+      ],
+    },
+  ]);
+  assert.equal(open.zones.length, 1);
+});
+
+test("joined divider junctions short of the perimeter still separate every region", () => {
+  const boundary = partitionCurves([
+    outer,
+    {
+      points: [
+        [0.02, 5],
+        [10, 8],
+      ],
+    },
+    {
+      points: [
+        [0.02, 5],
+        [10, 2],
+      ],
+    },
+  ]);
+  assert.equal(boundary.zones.length, 3);
+  assert.ok(
+    Math.abs(boundary.zones.reduce((sum, zone) => sum + zone.area, 0) - 100) <
+      1e-8,
+  );
+});
 test("open crossing and T-junction dividers become separate zones with no missing or duplicate area", () => {
   const b = partitionCurves([
     outer,

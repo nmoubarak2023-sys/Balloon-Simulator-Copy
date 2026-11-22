@@ -120,6 +120,7 @@ export async function startAutosave(adapters) {
     "pointerup",
     "keyup",
     "project-change",
+    "process-history-change",
   ])
     window.addEventListener(event, changed, { passive: true });
   document.addEventListener("visibilitychange", () => {

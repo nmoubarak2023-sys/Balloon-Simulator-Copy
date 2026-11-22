@@ -1585,3 +1585,89 @@ input.section-degree-entry[type="number"] {
   font-size: 0.7rem;
   letter-spacing: 0.06em;
 }
+
+#booleanWorkspace input[type="text"] {
+  min-width: 0;
+  width: 100%;
+  background: #050b0e;
+  border: 1px solid #28484f;
+  color: #d4eced;
+  padding: 7px;
+  font: inherit;
+  border-radius: 0;
+}
+
+.process-panel {
+  margin: 8px 0 14px;
+  border: 1px solid #28484f;
+  background: #050909;
+  color: #a5d8de;
+  font-size: 11px;
+}
+.process-panel summary {
+  padding: 12px 16px;
+  color: #80dce7;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+}
+.process-tools,
+.process-playback,
+.process-step-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  padding: 14px;
+}
+.process-tools label,
+.process-playback label,
+.process-step-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 140px;
+  flex: 1;
+}
+.process-tools input[type="text"],
+.process-step-editor input[type="text"] {
+  width: 100%;
+  min-width: 0;
+  color: #d4eced;
+  border: 1px solid #28484f;
+  background: #050b0e;
+  padding: 7px;
+  font: inherit;
+  border-radius: 0;
+}
+.process-tools output {
+  flex-basis: 100%;
+  color: #80dce7;
+}
+.process-replay {
+  width: 94vw;
+  max-width: 1600px;
+  max-height: 94vh;
+  padding: 0;
+  color: #c4e4e9;
+  background: #000;
+  border: 1px solid #417b84;
+  font-size: 11px;
+}
+.process-replay::backdrop { background: rgb(0 0 0 / 85%); }
+.process-replay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #28484f;
+}
+.process-replay .process-canvas { height: 52vh; min-height: 220px; }
+.process-canvas canvas { display: block; width: 100%; height: 100%; }
+.process-caption {
+  padding: 12px 16px;
+  color: #80dce7;
+  border-block: 1px solid #28484f;
+}
+.process-step-editor label.check { flex-direction: row; align-items: center; }
+.process-replay :is(input, select, button, label, output),
+.process-panel :is(input, select, button, label, output) { text-transform: uppercase; }

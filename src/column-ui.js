@@ -1,3 +1,4 @@
+import { findSupportSites, checkSupport } from "./boolean-supports.js";
 import { collisionRidges, wallMesh } from "./walls.js";
 import * as T from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -77,8 +78,13 @@ export function initColumns(
   getFloors,
   { walls = false } = {},
 ) {
-  const findSites = walls ? collisionRidges : collisionSites;
-  const buildSupport = walls ? wallMesh : columnMesh;
+  const findSites = (source) => findSupportSites(source, walls);
+  const buildSupport = (source, site, settings) =>
+    checkSupport(
+      (walls ? wallMesh : columnMesh)(source, site, settings),
+      source,
+      walls,
+    );
   const projectName = walls ? "wall-populate" : "column-populate";
   const supportName = walls ? "Wall" : "Column";
   const pane = document.createElement("main");
@@ -525,10 +531,14 @@ export function initColumns(
     copiedEnclosure = result.raw;
     const next = {
       raw: rawCopy(result.raw),
+      collisionRaw: result.collisionRaw,
+      siteVersion: 2,
       closed: result.closed,
       params: structuredClone(result.params),
       spheres: structuredClone(result.spheres),
       ids: [...result.ids],
+      booleanFloor: result.booleanFloor,
+      booleanCutters: structuredClone(result.booleanCutters ?? []),
     };
     const found = findSites(next);
     if (source) remember();
@@ -583,11 +593,23 @@ export function initColumns(
           ),
       ),
     );
-    if (source && !columns.length) {
+    if (source) {
       try {
         const fresh = getVoronoi(index);
-        if (fresh.raw !== copiedEnclosure) {
+        if (
+          fresh.raw !== copiedEnclosure || source.siteVersion !== 2 ||
+          (fresh.collisionRaw && !source.collisionRaw)
+        ) {
+          const placed = columns;
+          const previousSelected = selected;
           accept(fresh);
+          columns = placed;
+          selected = previousSelected;
+          display();
+          if (placed.length)
+            status(
+              "Boolean geometry updated. Review existing supports for clashes.",
+            );
           return;
         }
       } catch {
@@ -616,7 +638,7 @@ export function initColumns(
   $("cFloor").onchange = guarded(() => selectFloor(Number($("cFloor").value)));
   $("cImport").onclick = guarded(() => accept(getVoronoi(workingFloor)));
   $("cPlace").onclick = guarded(() => {
-    const site = sites[Number($("cSites").value)];
+    const site = sites.find((site) => site.id === Number($("cSites").value));
     if (!site)
       throw Error(
         "No collision locations. Copy a Voronoi enclosure with overlapping balloons.",
@@ -1091,6 +1113,12 @@ export function initColumns(
   return {
     pane,
     accept,
+    processView: () => ({
+      camera,
+      orbit,
+      roots: [root, context, markers],
+      workspace: walls ? "WALL POPULATE" : "COLUMN POPULATE",
+    }),
     saveSession() {
       const floors = new Map(floorWork);
       if (workingFloor !== undefined && source)
@@ -1115,6 +1143,10 @@ export function initColumns(
     },
     loadSession(data) {
       if (!data) return;
+      source = undefined;
+      workingFloor = undefined;
+      columns = [];
+      selected = -1;
       floorWork.clear();
       for (const [index, floor] of data.floors) floorWork.set(index, floor);
       for (const [index, visible] of data.floorVisibility)
@@ -1174,18 +1206,10 @@ export function initColumns(
       $("cIsolateFloor").disabled = !chosen;
       if (!chosen) return;
       $("cFloor").value = chosen.index;
-      if (
-        !source ||
-        !columns.length ||
-        (workingFloor !== undefined && workingFloor !== chosen.index)
-      ) {
-        try {
-          selectFloor(chosen.index);
-        } catch (error) {
-          status(error.message);
-        }
-      } else {
-        workingFloor = chosen.index;
+      try {
+        selectFloor(chosen.index);
+      } catch (error) {
+        status(error.message);
       }
       displayFloors();
       fit();
