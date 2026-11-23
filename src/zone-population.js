@@ -39,6 +39,6 @@ export function resetZonePopulation(snapshot) {
     result: null,
     stage: 0,
     resetStepMenu: true,
-    view: { ...snapshot.view, showAllZones: true },
+    view: { ...snapshot.view, showAllZones: true, zoneSteps: {} },
   };
 }

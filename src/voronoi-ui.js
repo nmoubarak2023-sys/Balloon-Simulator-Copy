@@ -63,6 +63,7 @@ export function initVoronoi(
     zoneConfigs = [],
     legacyRectangle = false,
     activeZone = 0,
+    zoneSteps = {},
     populatedZones = [],
     showAllZones = true;
   const zoneFields = [
@@ -181,6 +182,7 @@ export function initVoronoi(
         $("vn_" + id).value = $("v_" + id).value = zoneConfigs[activeZone][id];
   }
   function restoreZoneView(view) {
+    zoneSteps = { ...(view?.zoneSteps ?? {}) };
     activeZone = Math.max(
       0,
       Math.min(
@@ -212,9 +214,10 @@ export function initVoronoi(
     zoneUI(false);
   }
   $("vZone").onchange = () => {
+    zoneSteps[activeZone]=stage;
     storeZone();
     activeZone = Number($("vZone").value);
-    stage=0;
+    stage=[0,1,2,4,7].includes(zoneSteps[activeZone]) ? zoneSteps[activeZone] : 0;
     resetStepMenu=false;
     zoneUI();
     draw();
@@ -306,6 +309,7 @@ export function initVoronoi(
     boundary = next;
     populatedZones = [];
     zoneConfigs = defaultZoneSettings(next, activeFloor);
+    zoneSteps = {};
     activeZone = 0;
     zoneUI();
     const elevation = next.elevation ?? 0,
@@ -514,11 +518,12 @@ export function initVoronoi(
     floorState[activeFloor].snapshot = captureFloor();
   }
   function captureFloor() {
+    zoneSteps[activeZone]=stage;
     return {
       params: parameters(),
       result,
       editing: editing?.save(),
-      view: { activeZone, showAllZones },
+      view: { activeZone, showAllZones, zoneSteps: { ...zoneSteps } },
       stage,
       resetStepMenu,
       wire,
@@ -1897,6 +1902,7 @@ export function initVoronoi(
         }
         resetStepMenu = false;
         stage = requestedStage ?? 4;
+        zoneSteps[activeZone]=stage;
         mode = "spheres";
       }
       stashFloor();
@@ -2203,7 +2209,7 @@ export function initVoronoi(
           version: 2,
           ...accepted(),
           editing: editing?.save(),
-          view: { activeZone, showAllZones },
+          view: { activeZone, showAllZones, zoneSteps: { ...zoneSteps, [activeZone]: stage } },
         },
         (_, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v),
       ),
@@ -2264,7 +2270,7 @@ export function initVoronoi(
         format: "saved-voronoi-geometry",
         result: accepted(),
         editing: editing.save(),
-        view: { activeZone, showAllZones },
+        view: { activeZone, showAllZones, zoneSteps: { ...zoneSteps, [activeZone]: stage } },
         stage,
         wire,
         ghosted,
