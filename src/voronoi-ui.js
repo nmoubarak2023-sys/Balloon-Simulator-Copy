@@ -399,7 +399,7 @@ export function initVoronoi(
       floorState.forEach(f=>{f.snapshot=null;f.visible=true;});
       activeFloor=0;activeZone=0;zoneSteps={};populatedZones=[];result=null;
       isolateZone=false;$("vIsolateZone").checked=false;showAllZones=true;
-      editing?.load({});
+      editing?.load(null);
       worker?.terminate();worker=undefined;workerResult=undefined;
       journal.entries.length=0;$("vUndo").disabled=true;
       floorUI();
@@ -620,7 +620,7 @@ export function initVoronoi(
       populatedZones = [];
       activeZone = 0;
       result = null;
-      editing?.load({});
+      editing?.load(null);
       zoneUI();
       draw();
       $("vStatus").textContent =

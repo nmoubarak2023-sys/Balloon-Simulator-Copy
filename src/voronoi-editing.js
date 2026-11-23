@@ -1004,6 +1004,11 @@ export function createVoronoiEditing({
   }
   function load(data) {
     if (!data) {
+      active = 0;
+      point = 0;
+      selectedId = null;
+      tool = "orbit";
+      transform.detach();
       curves = [];
       resetCurve();
       edits = {};
