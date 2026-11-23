@@ -634,6 +634,7 @@ export function initVoronoi(
   }
   let editing;
   let worker,
+    workerResult,
     result,
     pending = false,
     mode = "roof",
@@ -1820,7 +1821,10 @@ export function initVoronoi(
     editing?.setBusy(true);
     $("vStatus").textContent = "Updating balloons and enclosure…";
     $("vGenerate").disabled = $("vPopulateCanvas").disabled = true;
-    worker ??= workerFactory();
+    if (!worker) {
+      worker = workerFactory();
+      workerResult = undefined;
+    }
     const cancelGeneration = () => {
       cancellations.delete(cancelGeneration);
       worker.terminate();
@@ -1852,7 +1856,14 @@ export function initVoronoi(
         return;
       }
       result = data.result;
+      workerResult = result;
       if (populate === true || populate === "preview") {
+        if (populate === true && boundary) {
+          isolateZone = true;
+          showAllZones = false;
+          $("vIsolateZone").checked = true;
+          $("vShowAllZones").checked = false;
+        }
         if (timer) {
           clearInterval(timer);
           timer = null;
@@ -1878,6 +1889,7 @@ export function initVoronoi(
           zones: result.zones?.map((z) => ({
             name: z.name,
             balloons: z.balloons,
+            rebuilt: z.rebuilt,
             closed: z.closed,
             components: z.components,
             volumeCubicFeet: z.volume,
@@ -1903,7 +1915,13 @@ export function initVoronoi(
       $("vGenerate").disabled = $("vPopulateCanvas").disabled = false;
       $("vStatus").textContent = e.message;
     };
-    worker.postMessage({ id: 1, action: "voronoi", params: parameters() });
+    worker.postMessage({
+      id: 1,
+      action: "voronoi",
+      params: parameters(),
+      editingZone: activeZone,
+      ...(result && result !== workerResult ? { previousResult: result } : {}),
+    });
   }
   // Capture center clicks before balloon/curve editing, while leaving orbit drags alone.
   const zoneRay = new T.Raycaster();
@@ -2020,7 +2038,10 @@ export function initVoronoi(
     fitNext = true;
     generate();
   };
-  $("vGenerate").onclick = $("vPopulateCanvas").onclick = () => generate(true);
+  $("vGenerate").onclick = $("vPopulateCanvas").onclick = () => {
+    remember(captureUndo());
+    generate(true);
+  };
   $("vFit").onclick = fit;
   $("vRoof").onclick = () => {
     resetStepMenu = false;

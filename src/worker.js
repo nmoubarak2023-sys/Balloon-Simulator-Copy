@@ -7,6 +7,7 @@ import { zonedVoronoiBuild } from "./zoned-voronoi.js";
 import { partitionCurves } from "./zones.js";
 let engine;
 let cachedOutput;
+let previousVoronoi;
 const history = new GeometryHistory(20);
 const ready = Module({ locateFile: () => wasmURL }).then((m) => {
   m.setup();
@@ -20,7 +21,11 @@ self.onmessage = async ({ data }) => {
     if (action === "partitionZones") {
       result = partitionCurves(data.curves, data.options);
     } else if (action === "voronoi") {
-      result = zonedVoronoiBuild(engine.m, data.params);
+      result = zonedVoronoiBuild(engine.m, data.params, {
+        previous: data.previousResult ?? previousVoronoi,
+        editingZone: data.editingZone,
+      });
+      previousVoronoi = result;
     } else if (action === "generate" || action === "restore") {
       const next = new BalloonEngine(engine.m);
       try {

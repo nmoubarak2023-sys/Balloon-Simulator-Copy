@@ -148,3 +148,93 @@ test("each populated zone gets its requested cell count without generating a can
     Array.from({ length: 5 }, (_, i) => ZONE_STRIDE + i),
   );
 });
+
+test("updating one zone reuses the exact geometry of other populated zones, including after loading a legacy recipe", () => {
+  const boundary = partitionCurves([
+    { closed: true, points: loops[0] },
+    {
+      points: [
+        [20, 0],
+        [20, 25],
+      ],
+    },
+  ]);
+  const configs = defaultZoneSettings(boundary).map((c) => ({
+    ...c,
+    count: 3,
+    selected: 3,
+    index: 0,
+  }));
+  const p = {
+    ...params,
+    boundary,
+    zoneSettings: configs,
+    populatedZones: [0, 1],
+  };
+  delete p.domain;
+  for (const legacy of [false, true]) {
+    const old = { ...p };
+    if (legacy) delete old.directCells;
+    const before = zonedVoronoiBuild(m, old);
+    const next = structuredClone(p);
+    next.zoneSettings[0].radiusMax += 2;
+    const after = zonedVoronoiBuild(m, next, {
+      previous: before,
+      editingZone: 0,
+    });
+    assert.equal(after.zones[0].rebuilt, true);
+    assert.equal(
+      after.zones[1].rebuilt,
+      false,
+      "neighbor is reused, not regenerated",
+    );
+    assert.deepEqual(after.zones[1].raw, before.zones[1].raw);
+    assert.deepEqual(
+      after.spheres.filter((s) => s.zone === 1),
+      before.spheres.filter((s) => s.zone === 1),
+    );
+    const floorChanged = zonedVoronoiBuild(
+      m,
+      { ...next, floor: 1 },
+      { previous: after, editingZone: 0 },
+    );
+    assert.equal(
+      floorChanged.zones[1].rebuilt,
+      true,
+      "shared geometric changes invalidate reuse",
+    );
+  }
+});
+
+test("populating a second zone adds only that zone and retains the first zone", () => {
+  const boundary = partitionCurves([
+    { closed: true, points: loops[0] },
+    {
+      points: [
+        [20, 0],
+        [20, 25],
+      ],
+    },
+  ]);
+  const configs = defaultZoneSettings(boundary).map((c) => ({
+    ...c,
+    count: 3,
+    selected: 3,
+    index: 0,
+  }));
+  const p = { ...params, boundary, zoneSettings: configs, populatedZones: [0] };
+  delete p.domain;
+  const first = zonedVoronoiBuild(m, p);
+  const second = zonedVoronoiBuild(
+    m,
+    { ...p, populatedZones: [0, 1] },
+    { previous: first, editingZone: 1 },
+  );
+  assert.equal(second.zones[0].rebuilt, false);
+  assert.equal(second.zones[1].rebuilt, true);
+  assert.deepEqual(second.zones[0].raw, first.zones[0].raw);
+  assert.deepEqual(
+    second.zones.map((z) => z.balloons),
+    [3, 3],
+  );
+});

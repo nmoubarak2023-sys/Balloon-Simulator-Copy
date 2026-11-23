@@ -18,7 +18,105 @@ export function defaultZoneSettings(boundary, floorIndex = 0) {
     };
   });
 }
-export function zonedVoronoiBuild(m, p) {
+function zoneParameters(p, i) {
+  const cfg = p.zoneSettings[i],
+    z = p.boundary.zones[i],
+    offset = i * ZONE_STRIDE,
+    bounds = loopBounds(z.loops);
+  const enabled = new Set(p.populatedZones ?? p.zoneSettings.map((_, i) => i));
+  const remap = (object) =>
+    Object.fromEntries(
+      Object.entries(object ?? {})
+        .filter(
+          ([id]) => Number(id) >= offset && Number(id) < offset + ZONE_STRIDE,
+        )
+        .map(([id, value]) => [Number(id) - offset, value]),
+    );
+  const localIds = (ids) =>
+    (ids ?? [])
+      .filter((id) => id >= offset && id < offset + ZONE_STRIDE)
+      .map((id) => id - offset);
+  return {
+    ...cfg,
+    ...(p.directCells ? { directCells: true } : {}),
+    selected: p.unclippedBalloons ? cfg.count : cfg.selected,
+    unclippedBalloons: !!p.unclippedBalloons,
+    clipFloor: !!p.clipFloor,
+    clipFloorEdge: !!p.clipFloorEdge,
+    floorPerimeter: p.boundary.perimeter,
+    rotations: remap(p.rotations),
+    unclippedBottoms: localIds(p.unclippedBottoms),
+    unclippedEdges: localIds(p.unclippedEdges),
+    width: bounds.width,
+    height: bounds.height,
+    floor: p.floor,
+    ...(p.ceilingZ === undefined ? {} : { ceilingZ: p.ceilingZ }),
+    spacing: p.spacing,
+    smoothing: p.smoothing,
+    domain: { loops: z.loops, elevation: p.boundary.elevation ?? 0 },
+    curves: p.curves,
+    edits: remap(p.edits),
+    pressureEnabled: !!p.pressureEnabled,
+    strength: p.strength ?? 0,
+    influence: p.influence ?? 10,
+    frozen: enabled.has(i) ? remap(p.frozen) : {},
+    popped: enabled.has(i)
+      ? localIds(p.popped)
+      : Array.from({ length: cfg.count }, (_, j) => j),
+    popEvents: (p.popEvents ?? []).filter(
+      (e) => e.zone === undefined || e.zone === i,
+    ),
+    popPressure: p.popPressure ?? 0.25,
+  };
+}
+function reusableZone(previous, p, i, editingZone, currentParams) {
+  if (
+    i === editingZone ||
+    !previous?.zones?.[i] ||
+    !previous.params?.boundary?.zones?.[i] ||
+    !previous.params.zoneSettings?.[i]
+  )
+    return null;
+  const wasEnabled =
+    previous.params.populatedZones ??
+    previous.params.boundary.zones.map((_, i) => i);
+  if (!wasEnabled.includes(i)) return null;
+  const old = zoneParameters(previous.params, i);
+  // Entering the new one-zone workflow must not silently convert untouched
+  // legacy zones to the new direct-cell recipe.
+  if (p.directCells) old.directCells = true;
+  const signature = (q) =>
+    JSON.stringify(q, (_key, value) =>
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      !ArrayBuffer.isView(value)
+        ? Object.fromEntries(
+            Object.keys(value)
+              .sort()
+              .map((key) => [key, value[key]]),
+          )
+        : value,
+    );
+  if (signature(old) !== signature(currentParams)) return null;
+  const offset = i * ZONE_STRIDE,
+    z = previous.zones[i];
+  return {
+    ...z,
+    reused: true,
+    params: currentParams,
+    points: previous.points.slice(offset, offset + ZONE_STRIDE).filter(Boolean),
+    cells: previous.cells.slice(offset, offset + ZONE_STRIDE),
+    cellLoops: previous.cellLoops?.slice(offset, offset + ZONE_STRIDE),
+    ids: previous.ids
+      .filter((id) => id >= offset && id < offset + ZONE_STRIDE)
+      .map((id) => id - offset),
+    spheres: previous.spheres
+      .filter((s) => s.id >= offset && s.id < offset + ZONE_STRIDE)
+      .map((s) => ({ ...s, id: s.id - offset })),
+  };
+}
+export function zonedVoronoiBuild(m, p, { previous, editingZone } = {}) {
   if (!p.boundary) return voronoiBuild(m, p);
   const boundary = p.boundary,
     configs = p.zoneSettings;
@@ -74,55 +172,10 @@ export function zonedVoronoiBuild(m, p) {
       });
       continue;
     }
-    const remap = (object) =>
-      Object.fromEntries(
-        Object.entries(object ?? {})
-          .filter(
-            ([id]) => Number(id) >= offset && Number(id) < offset + ZONE_STRIDE,
-          )
-          .map(([id, value]) => [Number(id) - offset, value]),
-      );
     try {
-      results.push(
-        voronoiBuild(m, {
-          ...cfg,
-          ...(p.directCells ? { directCells: true } : {}),
-          selected: p.unclippedBalloons ? cfg.count : cfg.selected,
-          unclippedBalloons: !!p.unclippedBalloons,
-          clipFloor: !!p.clipFloor,
-          clipFloorEdge: !!p.clipFloorEdge,
-          floorPerimeter: boundary.perimeter,
-          rotations: remap(p.rotations),
-          unclippedBottoms: (p.unclippedBottoms ?? [])
-            .filter((id) => id >= offset && id < offset + ZONE_STRIDE)
-            .map((id) => id - offset),
-          unclippedEdges: (p.unclippedEdges ?? [])
-            .filter((id) => id >= offset && id < offset + ZONE_STRIDE)
-            .map((id) => id - offset),
-          width: bounds.width,
-          height: bounds.height,
-          floor: p.floor,
-          ...(p.ceilingZ === undefined ? {} : { ceilingZ: p.ceilingZ }),
-          spacing: p.spacing,
-          smoothing: p.smoothing,
-          domain: { loops: z.loops, elevation: boundary.elevation ?? 0 },
-          curves: p.curves,
-          edits: remap(p.edits),
-          pressureEnabled: !!p.pressureEnabled,
-          strength: p.strength ?? 0,
-          influence: p.influence ?? 10,
-          frozen: enabled.has(i) ? remap(p.frozen) : {},
-          popped: !enabled.has(i)
-            ? Array.from({ length: cfg.count }, (_, j) => j)
-            : (p.popped ?? [])
-                .filter((id) => id >= offset && id < offset + ZONE_STRIDE)
-                .map((id) => id - offset),
-          popEvents: (p.popEvents ?? []).filter(
-            (e) => e.zone === undefined || e.zone === i,
-          ),
-          popPressure: p.popPressure ?? 0.25,
-        }),
-      );
+      const params = zoneParameters(p, i);
+      const reused = reusableZone(previous, p, i, editingZone, params);
+      results.push(reused ?? voronoiBuild(m, params));
     } catch (e) {
       throw Error(`${z.name}: ${e.message}`);
     }
@@ -137,10 +190,11 @@ export function zonedVoronoiBuild(m, p) {
   let union;
   try {
     results.forEach((r, zone) => {
-      r.raw = prepareMesh(r.raw, 1e-5, {
-        precision: "double",
-        regularizeTiny: true,
-      });
+      if (!r.reused)
+        r.raw = prepareMesh(r.raw, 1e-5, {
+          precision: "double",
+          regularizeTiny: true,
+        });
       if (r.raw.indices.length) {
         const solid = new m.Manifold(
           new m.Mesh({
@@ -156,12 +210,13 @@ export function zonedVoronoiBuild(m, p) {
           );
         }
         solids.push(solid);
-        const native = solid.getMesh();
-        r.raw = prepareMesh(
-          { positions: native.vertProperties, indices: native.triVerts },
-          1e-5,
-          { precision: "double", regularizeTiny: true },
-        );
+        const native = r.reused ? null : solid.getMesh();
+        if (native)
+          r.raw = prepareMesh(
+            { positions: native.vertProperties, indices: native.triVerts },
+            1e-5,
+            { precision: "double", regularizeTiny: true },
+          );
         const pieces = solid.decompose();
         r.components = pieces.length;
         pieces.forEach((s) => s.delete());
@@ -189,6 +244,7 @@ export function zonedVoronoiBuild(m, p) {
         closed: r.closed,
         components: r.components,
         balloons: r.spheres.length,
+        rebuilt: !r.reused && !!r.raw.indices.length,
         volume: r.volume,
       });
     });
