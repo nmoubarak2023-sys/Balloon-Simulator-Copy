@@ -214,7 +214,7 @@ export function initVoronoi(
   $("vZone").onchange = () => {
     storeZone();
     activeZone = Number($("vZone").value);
-    stage=populatedZones.includes(activeZone)?4:0;
+    stage=0;
     resetStepMenu=false;
     zoneUI();
     draw();
@@ -1601,7 +1601,7 @@ export function initVoronoi(
       const mesh = new T.Mesh(smooth, mat);
       if (wire) mesh.add(quadWire(raw));
       group.add(mesh);
-    } else if (stage === 4 || stage === 5) {
+    } else if (stage === 4 || stage === 5 || (stage < 4 && boundary && !isolateZone && showAllZones)) {
       const { width: w, height: h, floor } = result.params;
       const planes = [
         new T.Plane(new T.Vector3(1, 0, 0), 0),
@@ -1611,7 +1611,7 @@ export function initVoronoi(
         new T.Plane(new T.Vector3(0, 0, 1), -floor),
       ];
       renderers[0].localClippingEnabled = true;
-      for (const s of result.spheres.filter((s) => visible(s.id))) {
+      for (const s of result.spheres.filter((s) => visible(s.id) && (stage >= 4 || s.zone !== activeZone))) {
         const mesh = new T.Mesh(
           s.raw ? geometry(s.raw) : new T.SphereGeometry(s.radius, 64, 40),
           new T.MeshPhysicalMaterial({
@@ -1682,6 +1682,7 @@ export function initVoronoi(
     );
     result.cells.forEach((cell, i) => {
       if (!cell.length || !visible(i)) return;
+      if(boundary && stage < 4 && Math.floor(i/ZONE_STRIDE)!==activeZone) return;
       if (
         result.params.boundary &&
         result.params.populatedZones &&
@@ -1889,12 +1890,6 @@ export function initVoronoi(
       result = data.result;
       workerResult = result;
       if (populate === true || populate === "preview") {
-        if (populate === true && boundary) {
-          isolateZone = true;
-          showAllZones = false;
-          $("vIsolateZone").checked = true;
-          $("vShowAllZones").checked = false;
-        }
         if (timer) {
           clearInterval(timer);
           timer = null;
