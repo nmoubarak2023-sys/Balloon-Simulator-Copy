@@ -15,7 +15,7 @@ export function mountZoneBoundaries({
   button.setAttribute("aria-pressed", "false");
   pane.querySelector(".canvas-tools").append(button);
   const panel = document.createElement("section");
-  panel.className = "collaboration-layout";
+  panel.className = "collaboration-layout zone-boundary-editor";
   panel.hidden = true;
   panel.innerHTML = `<strong>SHARED ZONE BOUNDARY</strong><label>BOUNDARY<select data-edge aria-label="SHARED ZONE BOUNDARY"></select></label><label>TYPE<select data-mode><option value="open">OPEN</option><option value="soft">SOFT</option></select></label><div data-soft><label>TRANSITION WIDTH (FT)<input data-width type="number" min="2" max="100" value="12"></label><label>VALLEY HEIGHT (FT)<input data-height type="number" min="1" max="100" value="8"></label></div><button data-preview>PREVIEW BOUNDARY</button><button data-apply>APPLY BOUNDARY</button><label><input data-guides type="checkbox"> SHOW BOUNDARY TYPES</label><div data-viewport style="height:220px;background:#000" hidden></div><output role="status">HOVER AND CLICK A SHARED EDGE IN EITHER VIEW.</output>`;
   pane.querySelector("#vZoneInfo").after(panel);

@@ -308,7 +308,7 @@ export function voronoiBuild(m, p) {
         1,
       ) * 20;
     const prism =
-      domainLoops && !p.unclippedBalloons
+      domainLoops && (!p.unclippedBalloons || lobby)
         ? own(
             own(rectangle.extrude(prismHeight * 2)).translate([
               0,
@@ -462,6 +462,7 @@ export function voronoiBuild(m, p) {
               ? !!s.analyticSurface
               : !pressure && !(p.popEvents?.length && p.popPressure > 0);
             if (rotation) s.analyticSurface = false;
+            if (lobby) s.analyticSurface = false;
             if (p.zoneBoundaryRules?.length) s.analyticSurface = false;
             const full = solid;
             if (p.clipFloor && !openBottom.has(s.id))

@@ -1164,6 +1164,7 @@ footer {
 }
 .collaboration-layout { display: grid; gap: 12px; border: 1px solid #28484f; padding: 12px; }
 .collaboration-layout[hidden] { display: none !important; }
+.zone-boundary-editor > strong { font-size: 12px; letter-spacing: 0.04em; white-space: nowrap; }
 .collaboration-layout > summary { color: #80dce7; cursor: pointer; }
 .collaboration-layout label, .collaboration-layout [data-fields] { display: grid; gap: 8px; }
 .collaboration-layout [hidden] { display: none !important; }

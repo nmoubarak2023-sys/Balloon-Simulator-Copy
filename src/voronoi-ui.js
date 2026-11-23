@@ -2430,6 +2430,28 @@ export function initVoronoi(
     rhino,
   );
   pane.after(boolean.pane);
+  const buildingExport = document.createElement("div");
+  buildingExport.className = "floor-toolbar voronoi-uppercase";
+  buildingExport.innerHTML =
+    '<strong>BUILDING EXPORT</strong><label>RHINO EXPORT<select aria-label="BUILDING EXPORT PARTS"><option value="separate">SEPARATE PARTS</option><option value="joined">JOINED RESULT</option></select></label><button>EXPORT BUILDING .3DM</button><output role="status"></output>';
+  nav.after(buildingExport);
+  buildingExport.querySelector("button").onclick = async () => {
+    const button = buildingExport.querySelector("button"),
+      message = buildingExport.querySelector("output");
+    button.disabled = true;
+    try {
+      await boolean.exportBuilding({
+        separate: buildingExport.querySelector("select").value === "separate",
+        onProgress: (text) => (message.textContent = text),
+      });
+      message.textContent =
+        "BUILDING EXPORTED · ALL FLOORS, VAULTS, WALLS AND COLUMNS";
+    } catch (e) {
+      message.textContent = e.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
   const columns = initColumns(rhino, getFloorEnclosure, getSupportFloors);
   const walls = initColumns(rhino, getFloorEnclosure, getSupportFloors, {
     walls: true,

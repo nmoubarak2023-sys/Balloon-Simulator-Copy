@@ -225,7 +225,19 @@ export function booleanFloors(m, floors, cutters, slabThickness) {
       const slab = base.translate([0, 0, floor.elevation - slabThickness]);
       const cut = subtractCutters(m, slab, cutters, floor.index, "slabs");
       try {
-        pieces.push({ name: floor.name + " SLAB", raw: checkedRaw(cut) });
+        pieces.push({
+          name: floor.name + " SLAB",
+          raw: checkedRaw(cut),
+          ...(!cutters.some((c) => affects(c, floor.index, "slabs"))
+            ? {
+                extrusion: {
+                  perimeter: floor.perimeter,
+                  base: floor.elevation - slabThickness,
+                  height: slabThickness,
+                },
+              }
+            : {}),
+        });
       } finally {
         if (cut !== slab) cut.delete();
         slab.delete();

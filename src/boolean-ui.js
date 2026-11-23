@@ -3,9 +3,12 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { geometry } from "./view.js";
 import { addTechnicalFrames } from "./frames.js";
-import { addRhinoMesh } from "./rhino-io.js";
 import { queueAutosave } from "./autosave.js";
 import { isUndoShortcut } from "./history.js";
+import {
+  booleanExportPieces,
+  addRhinoBuildingPiece,
+} from "./boolean-export.js";
 
 export function initBoolean(getFloors, rhino) {
   const pane = document.createElement("main");
@@ -13,7 +16,7 @@ export function initBoolean(getFloors, rhino) {
   pane.hidden = true;
   pane.className = "voronoi-uppercase";
   pane.innerHTML =
-    '<div class="voro-layout"><section class="panel" data-frame-count="1"><div class="panel-heading">PERSPECTIVE <small>BOOLEAN</small><button id="bFit">FIT</button></div><div class="canvas-tools"><button id="bAdd">ADD BOOLEAN BALLOON</button><button id="bMove">MOVE</button><button id="bScale">SCALE / SCALE 1D</button><button id="bRotate">ROTATE</button><button id="bGhost" aria-pressed="true">GHOSTED</button><button id="bWire" aria-pressed="false">WIRE</button><button id="bClip" aria-pressed="false">CLIPPING PLANE</button><button id="bPlane">MOVE / ROTATE PLANE</button><button id="bUndo">UNDO / CTRL+Z</button></div><div id="bCanvas" class="voro-canvas"></div></section><aside><section class="panel" data-frame-count="2"><div class="panel-heading">BOOLEAN BALLOONS</div><div class="voro-controls"><label>SELECT BALLOON<select id="bSelected"></select></label><label>NAME<input id="bName" type="text"></label><label class="check"><input type="checkbox" id="bEnabled"> ENABLE BOOLEAN</label><label class="check"><input type="checkbox" id="bVisible" checked> SHOW CUTTERS</label><div class="pair"><button id="bDuplicate">DUPLICATE</button><button id="bDelete">DELETE BALLOON</button></div><label>MODE<select id="bMode"><option value="void">VOID ONLY</option><option value="shell">VOID + SHELL</option></select></label><div id="bNumbers"></div><label>THICKNESS DIRECTION<select id="bOffset"><option value="outward">OUTWARD</option><option value="inward">INWARD</option><option value="centered">CENTERED</option></select></label><label>MESH QUALITY<select id="bQuality"><option value="48">DRAFT · 48</option><option value="96" selected>SMOOTH · 96</option><option value="192">FINE · 192</option></select></label><strong>AFFECTED FLOORS</strong><div id="bFloors"></div><strong>CUT ELEMENTS</strong><div class="pair"><button id="bVaultsOnly">VAULTS ONLY</button><button id="bAllElements">ALL ELEMENTS</button></div><div id="bTargets"></div><label>VAULT SHELL THICKNESS (FT)<input id="bVault" type="number" min="0.05" step="0.05" value="1"></label><label>SLAB THICKNESS (FT)<input id="bSlab" type="number" min="0.05" step="0.05" value="1"></label><label class="check"><input id="bJoin" type="checkbox" checked> JOIN RESULT</label><button id="bApply" class="primary">APPLY BOOLEAN</button><button id="bExport">EXPORT RESULT .3DM</button><div id="bState" role="status"></div></div></section></aside></div><div class="status-bar" id="bStatus" role="status">ADD A BOOLEAN BALLOON TO BEGIN.</div>';
+    '<div class="voro-layout"><section class="panel" data-frame-count="1"><div class="panel-heading">PERSPECTIVE <small>BOOLEAN</small><button id="bFit">FIT</button></div><div class="canvas-tools"><button id="bAdd">ADD BOOLEAN BALLOON</button><button id="bMove">MOVE</button><button id="bScale">SCALE / SCALE 1D</button><button id="bRotate">ROTATE</button><button id="bGhost" aria-pressed="true">GHOSTED</button><button id="bWire" aria-pressed="false">WIRE</button><button id="bClip" aria-pressed="false">CLIPPING PLANE</button><button id="bPlane">MOVE / ROTATE PLANE</button><button id="bUndo">UNDO / CTRL+Z</button></div><div id="bCanvas" class="voro-canvas"></div></section><aside><section class="panel" data-frame-count="2"><div class="panel-heading">BOOLEAN BALLOONS</div><div class="voro-controls"><label>SELECT BALLOON<select id="bSelected"></select></label><label>NAME<input id="bName" type="text"></label><label class="check"><input type="checkbox" id="bEnabled"> ENABLE BOOLEAN</label><label class="check"><input type="checkbox" id="bVisible" checked> SHOW CUTTERS</label><div class="pair"><button id="bDuplicate">DUPLICATE</button><button id="bDelete">DELETE BALLOON</button></div><label>MODE<select id="bMode"><option value="void">VOID ONLY</option><option value="shell">VOID + SHELL</option></select></label><div id="bNumbers"></div><label>THICKNESS DIRECTION<select id="bOffset"><option value="outward">OUTWARD</option><option value="inward">INWARD</option><option value="centered">CENTERED</option></select></label><label>MESH QUALITY<select id="bQuality"><option value="48">DRAFT · 48</option><option value="96" selected>SMOOTH · 96</option><option value="192">FINE · 192</option></select></label><strong>AFFECTED FLOORS</strong><div id="bFloors"></div><strong>CUT ELEMENTS</strong><div class="pair"><button id="bVaultsOnly">VAULTS ONLY</button><button id="bAllElements">ALL ELEMENTS</button></div><div id="bTargets"></div><label>VAULT SHELL THICKNESS (FT)<input id="bVault" type="number" min="0.05" step="0.05" value="1"></label><label>SLAB THICKNESS (FT)<input id="bSlab" type="number" min="0.05" step="0.05" value="1"></label><label class="check"><input id="bJoin" type="checkbox" checked> JOIN RESULT</label><button id="bApply" class="primary">APPLY BOOLEAN</button><label>RHINO EXPORT<select id="bExportParts"><option value="joined">JOINED RESULT</option><option value="separate">SEPARATE PARTS</option></select></label><button id="bExport">EXPORT RESULT .3DM</button><div id="bState" role="status"></div></div></section></aside></div><div class="status-bar" id="bStatus" role="status">ADD A BOOLEAN BALLOON TO BEGIN.</div>';
   const $ = (id) => pane.querySelector("#" + id);
   const progress = document.createElement("output");
   progress.id = "bProgress";
@@ -353,9 +356,7 @@ export function initBoolean(getFloors, rhino) {
     status();
   }
   function resultPieces() {
-    return outputs.assembly
-      ? [{ name: "BOOLEAN BUILDING · JOINED", raw: outputs.assembly }]
-      : [...outputs.floors.flatMap((floor) => floor.pieces), ...outputs.shells];
+    return booleanExportPieces(outputs);
   }
   function draw() {
     clear(building);
@@ -794,13 +795,15 @@ export function initBoolean(getFloors, rhino) {
         doc = new r.File3dm();
       try {
         doc.settings().modelUnitSystem = r.UnitSystem.Feet;
-        for (const piece of resultPieces())
-          if (piece.raw.indices.length)
-            addRhinoMesh(r, doc, piece.raw, piece.name);
+        const separate = $("bExportParts").value === "separate";
+        for (const piece of booleanExportPieces(outputs, separate))
+          if (piece.raw.indices.length) addRhinoBuildingPiece(r, doc, piece);
         const url = URL.createObjectURL(new Blob([doc.toByteArray()]));
         const a = document.createElement("a");
         a.href = url;
-        a.download = "boolean-building.3dm";
+        a.download = separate
+          ? "boolean-building-separate-parts.3dm"
+          : "boolean-building.3dm";
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       } finally {
@@ -813,9 +816,74 @@ export function initBoolean(getFloors, rhino) {
   addTechnicalFrames(pane);
   return {
     pane,
+    async exportBuilding({ separate, onProgress = () => {} }) {
+      if (busy) throw Error("WAIT FOR THE CURRENT BOOLEAN OPERATION.");
+      const source = getFloors();
+      if (
+        !source.some(
+          (f) =>
+            f.raw?.indices.length ||
+            f.perimeter?.length ||
+            f.columns?.length ||
+            f.walls?.length,
+        )
+      )
+        throw Error("CREATE BUILDING GEOMETRY BEFORE EXPORTING.");
+      const exportWorker = new Worker(
+        new URL("./boolean-worker.js", import.meta.url),
+        { type: "module" },
+      );
+      try {
+        const data = await new Promise((resolve, reject) => {
+          exportWorker.onerror = (e) => reject(Error(e.message));
+          exportWorker.onmessage = ({ data }) => {
+            if (data.progress) {
+              onProgress(data.progress);
+              return;
+            }
+            if (data.preview) return;
+            if (data.error) reject(Error(data.error));
+            else resolve(data);
+          };
+          exportWorker.postMessage({
+            floors: source,
+            cutters: structuredClone(cutters),
+            vaultThickness: Number($("bVault").value),
+            slabThickness: Number($("bSlab").value),
+            joinResult: !separate,
+          });
+        });
+        const r = await rhino(),
+          doc = new r.File3dm();
+        try {
+          doc.settings().modelUnitSystem = r.UnitSystem.Feet;
+          for (const piece of booleanExportPieces(data, separate))
+            addRhinoBuildingPiece(r, doc, piece);
+          const url = URL.createObjectURL(new Blob([doc.toByteArray()]));
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = separate
+            ? "building-separate-parts.3dm"
+            : "building-joined.3dm";
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } finally {
+          doc.delete();
+        }
+      } finally {
+        exportWorker.terminate();
+      }
+    },
     reset() {
-      cutters=[];selected=-1;outputs=undefined;envelopes=undefined;appliedKey=undefined;envelopeKey=undefined;history.length=0;
-      building.clear();tools.clear();
+      cutters = [];
+      selected = -1;
+      outputs = undefined;
+      envelopes = undefined;
+      appliedKey = undefined;
+      envelopeKey = undefined;
+      history.length = 0;
+      building.clear();
+      tools.clear();
     },
     processView: () => ({
       camera,

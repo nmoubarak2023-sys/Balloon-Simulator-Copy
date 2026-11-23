@@ -61,6 +61,11 @@ test("lobby creates exactly one zone-spanning balloon with a height limit and ed
   const balloon = r.spheres[0];
   assert.ok(balloon.radius * balloon.axisScale[2] <= 10.00001);
   assert.equal(r.quality.boundaryEdges, 0);
+  for (const raw of [r.raw, r.spheres[0].raw, r.spheres[0].fullRaw].filter(Boolean))
+    for (let i = 0; i < raw.positions.length; i += 3) {
+      assert.ok(raw.positions[i] >= -0.0001 && raw.positions[i] <= 100.0001);
+      assert.ok(raw.positions[i + 1] >= -0.0001 && raw.positions[i + 1] <= 60.0001);
+    }
   const edited = voronoiBuild(m, {
     ...p,
     edits: { 0: [2, 0, 0, 1, 1, 1, 1.2] },
@@ -68,6 +73,20 @@ test("lobby creates exactly one zone-spanning balloon with a height limit and ed
   assert.equal(edited.spheres[0].center[0], balloon.center[0] + 2);
   assert.ok(edited.spheres[0].axisScale[2] > balloon.axisScale[2]);
 });
+test("lobby respects concave zone edges even with full balloons enabled", () => {
+  const concave = [[[0, 0], [100, 0], [100, 30], [50, 30], [50, 60], [0, 60]]];
+  const r = voronoiBuild(m, {
+    ...params,
+    ...lobbyZone(concave, 10),
+    directCells: true,
+    domain: { loops: concave, elevation: 0 },
+  });
+  for (let i = 0; i < r.raw.positions.length; i += 3)
+    assert.ok(!(r.raw.positions[i] > 50.0001 && r.raw.positions[i + 1] > 30.0001), "no geometry spills into the adjoining zone");
+  assert.equal(r.quality.boundaryEdges, 0);
+  assert.equal(r.spheres[0].analyticSurface, false);
+});
+
 test("collaboration opt-in leaves custom geometry exactly unchanged", () => {
   const legacy = { ...params };
   for (const key of [
