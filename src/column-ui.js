@@ -1112,6 +1112,10 @@ export function initColumns(
   frame();
   return {
     pane,
+    reset() {
+      floorWork.clear();floorVisibility.clear();columns=[];sites=[];source=undefined;workingFloor=undefined;selected=-1;history.length=0;
+      root.clear();context.clear();markers.clear();$("cUndo").disabled=true;
+    },
     accept,
     processView: () => ({
       camera,

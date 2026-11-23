@@ -783,5 +783,14 @@ export function initRealistic(pane, getFloors) {
   show.loadSession = (data) => {
     restored = data;
   };
+  show.reset=()=>{
+    worker?.terminate();worker=undefined;inFlight=undefined;failedKey=undefined;
+    removeObject(mesh);removeObject(cap);mesh=cap=undefined;
+    scaleFigures.clear();figurePositions.length=0;needsRender=true;
+    restored={...readState(),figures:[],sectionOn:false};
+    history.entries.length=0;
+    fitted=false;
+    modelKey=undefined;
+  };
   return show;
 }

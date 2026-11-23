@@ -1,3 +1,8 @@
+export function modelUndoSignature(signature) {
+  const state=JSON.parse(signature);
+  delete state.cameraPosition;delete state.orbitTarget;
+  return JSON.stringify(state);
+}
 export class GeometryHistory {
   constructor(limit = 20) {
     this.limit = limit;

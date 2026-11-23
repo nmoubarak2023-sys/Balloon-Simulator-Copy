@@ -11,7 +11,7 @@ import { initRealistic } from "./realistic-ui.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
-import { UndoJournal, isUndoShortcut } from "./history.js";
+import { UndoJournal, isUndoShortcut, modelUndoSignature } from "./history.js";
 import { placeSavedFloor } from "./floor-placement.js";
 import { inLoops, loopBounds } from "./zones.js";
 import { defaultZoneSettings, ZONE_STRIDE } from "./zoned-voronoi.js";
@@ -395,6 +395,14 @@ export function initVoronoi(
         cancellations.delete(cancelPartition);
         partitionWorker.terminate();
       }
+      columns.reset();walls.reset();boolean.reset();showRealistic.reset();
+      floorState.forEach(f=>{f.snapshot=null;f.visible=true;});
+      activeFloor=0;activeZone=0;zoneSteps={};populatedZones=[];result=null;
+      isolateZone=false;$("vIsolateZone").checked=false;showAllZones=true;
+      editing?.load({});
+      worker?.terminate();worker=undefined;workerResult=undefined;
+      journal.entries.length=0;$("vUndo").disabled=true;
+      floorUI();
       if (boundaries.length === 1) await importBoundary(boundaries[0]);
       else {
         // Validate every level before replacing any existing floor state.
@@ -876,7 +884,7 @@ export function initVoronoi(
   }
   function sameUndoState(a, b) {
     return (
-      a.signature === b.signature &&
+      modelUndoSignature(a.signature) === modelUndoSignature(b.signature) &&
       a.floors.every(
         (floor, index) =>
           floor.snapshot?.result === b.floors[index].snapshot?.result,
@@ -897,10 +905,10 @@ export function initVoronoi(
     const entry = journal.pop();
     $("vUndo").disabled = !journal.length;
     if (!entry) return;
-    restoreWorkspace(entry);
+    restoreWorkspace(entry,true);
     $("vStatus").textContent = "Last workspace action undone.";
   }
-  function restoreWorkspace(entry) {
+  function restoreWorkspace(entry,preserveCamera=false) {
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -921,9 +929,11 @@ export function initVoronoi(
     degreeEntry.hidden = true;
     updateSectionPlane();
     syncSectionButtons();
-    restoreFloor(floorState[activeFloor].snapshot, false, false, true);
-    camera.position.fromArray(state.cameraPosition);
-    orbit.target.fromArray(state.orbitTarget);
+    restoreFloor(floorState[activeFloor].snapshot, false, false, true,preserveCamera);
+    if(!preserveCamera) {
+      camera.position.fromArray(state.cameraPosition);
+      orbit.target.fromArray(state.orbitTarget);
+    }
     orbit.update();
     updateFloorReport();
   }
@@ -978,10 +988,6 @@ export function initVoronoi(
     },
     true,
   );
-  sectionCanvas.addEventListener("wheel", () => remember(captureUndo()), {
-    capture: true,
-    passive: true,
-  });
   const diagram = new T.Scene();
   function resize() {
     renderers.forEach((r, i) => {

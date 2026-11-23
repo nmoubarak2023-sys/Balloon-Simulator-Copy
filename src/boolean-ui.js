@@ -813,6 +813,10 @@ export function initBoolean(getFloors, rhino) {
   addTechnicalFrames(pane);
   return {
     pane,
+    reset() {
+      cutters=[];selected=-1;outputs=undefined;envelopes=undefined;appliedKey=undefined;envelopeKey=undefined;history.length=0;
+      building.clear();tools.clear();
+    },
     processView: () => ({
       camera,
       orbit,
