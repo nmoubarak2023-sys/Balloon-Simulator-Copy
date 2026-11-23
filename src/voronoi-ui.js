@@ -1,3 +1,7 @@
+import {
+  mountCollaborationLayout,
+  releaseCollaborationPoints,
+} from "./collaboration-layout.js";
 import { initBoolean } from "./boolean-ui.js";
 import { initMeasure } from "./voronoi-measure.js";
 import { queueAutosave } from "./autosave.js";
@@ -123,6 +127,22 @@ export function initVoronoi(
     pending = value;
     updateLoading();
   }
+  const collaboration = mountCollaborationLayout({
+    anchor: $("vZoneInfo"),
+    getState: () => ({
+      loops: boundary?.zones[activeZone]?.loops,
+      config: zoneConfigs[activeZone],
+      busy: pending || backgroundTasks > 0,
+    }),
+    apply: (settings) => {
+      if (!boundary) throw Error("IMPORT A ZONED FLOOR FIRST.");
+      remember(captureUndo());
+      storeZone();
+      Object.assign(zoneConfigs[activeZone], settings);
+      zoneUI();
+      generate(true);
+    },
+  });
   function storeZone() {
     if (!boundary || !zoneConfigs[activeZone]) return;
     for (const id of zoneFields)
@@ -134,6 +154,7 @@ export function initVoronoi(
     }
   }
   function zoneUI(load = true) {
+    collaboration.refresh();
     $("vZone").replaceChildren(
       ...(boundary
         ? boundary.zones.map((z, i) => new Option(z.name, i))
@@ -2077,6 +2098,7 @@ export function initVoronoi(
     };
     for (const input of [range, number])
       input.onchange = () => {
+        releaseCollaborationPoints(zoneConfigs[activeZone], id);
         if (id === "radiusMin" || id === "radiusMax") {
           const min = Number($("vn_radiusMin").value),
             max = Number($("vn_radiusMax").value);

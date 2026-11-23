@@ -1,3 +1,4 @@
+import { studioLayout } from "./studio-layout.js";
 import { inLoops, loopBounds } from "./zones.js";
 import { validateVoronoiLifecycle } from "./voronoi-lifecycle.js";
 import { validBalloonEdit } from "./balloon-edit.js";
@@ -8,6 +9,11 @@ import { MeshBVH } from "three-mesh-bvh";
 import { meshQuality, signedVolume } from "./mesh-quality.js";
 export function voronoiBuild(m, p) {
   validateVoronoiLifecycle(p);
+  if (
+    p.spatialType !== undefined &&
+    !["studio", "custom"].includes(p.spatialType)
+  )
+    throw Error("Unknown spatial type.");
   const {
     width: w,
     height: h,
@@ -41,6 +47,7 @@ export function voronoiBuild(m, p) {
             "unclippedEdges",
             "unclippedBottoms",
             "rotations",
+            "spatialType",
           ].includes(k),
       )
       .every(([, v]) => Number.isFinite(v)) ||
@@ -119,6 +126,10 @@ export function voronoiBuild(m, p) {
     [x0, y0] = domainBounds.min;
   const rng = random(seed),
     points = [];
+  if (p.spatialType === "studio" && domainLoops)
+    points.push(...studioLayout(domainLoops, p));
+  if (p.spatialType === "studio" && domainLoops && points.length !== count)
+    throw Error("APPLY THE COLLABORATION LAYOUT TO UPDATE ITS BALLOON COUNT.");
   for (
     let attempts = 0;
     points.length < count && attempts < count * 20000;
@@ -199,11 +210,16 @@ export function voronoiBuild(m, p) {
       const radius = radiusMin + rr() * (radiusMax - radiusMin);
       const elevation = p.domain?.elevation ?? 0;
       const clearance = p.ceilingZ - elevation;
-      const verticalBase = clearance > 0 ? Math.min(1, clearance / radius) : 1;
+      const height =
+        p.spatialType === "studio"
+          ? Math.min(p.studioHeight ?? 12, clearance > 0 ? clearance : Infinity)
+          : clearance;
+      const verticalBase = height > 0 ? Math.min(1, height / radius) : 1;
       return {
         id,
         axisScale: [
-          edit?.[4] ?? 1,
+          (edit?.[4] ?? 1) *
+            (p.spatialType === "studio" ? (p.studioElongation ?? 2) : 1),
           edit?.[5] ?? 1,
           verticalBase * (edit?.[6] ?? 1),
         ],
@@ -378,7 +394,20 @@ export function voronoiBuild(m, p) {
                   ),
                 ).translate(s.center),
               );
-            const rotation = p.rotations?.[s.id];
+            const baseRotation =
+              p.spatialType === "studio"
+                ? new T.Quaternion().setFromAxisAngle(
+                    new T.Vector3(0, 0, 1),
+                    ((p.studioAngle ?? 0) * Math.PI) / 180,
+                  )
+                : undefined;
+            const userRotation = p.rotations?.[s.id];
+            const rotation = baseRotation
+              ? new T.Quaternion()
+                  .fromArray(userRotation ?? [0, 0, 0, 1])
+                  .multiply(baseRotation)
+                  .toArray()
+              : userRotation;
             if (!savedRaw && rotation) {
               const quaternion = new T.Quaternion().fromArray(rotation);
               const center = new T.Vector3(...s.center);
