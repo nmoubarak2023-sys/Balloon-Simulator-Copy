@@ -10,7 +10,6 @@ import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import { UndoJournal, isUndoShortcut } from "./history.js";
-import { populateAllZones } from "./zone-population.js";
 import { placeSavedFloor } from "./floor-placement.js";
 import { inLoops, loopBounds } from "./zones.js";
 import { defaultZoneSettings, ZONE_STRIDE } from "./zoned-voronoi.js";
@@ -74,7 +73,7 @@ export function initVoronoi(
     "radiusMax",
     "radiusSeed",
   ];
-  pane.innerHTML = `<div class="voro-layout"><section class="panel"><div class="panel-heading"><span>PERSPECTIVE <small>01 / VORONOI BALLOONS</small></span><button id="vFit">FIT ↗</button></div><div class="canvas-tools"><button id="vRoof" aria-pressed="true">ENCLOSURE</button><button id="vSpheres" aria-pressed="false">BALLOONS</button><button id="vPickZone" aria-pressed="false">PICK ZONE</button><button id="vIsolateCanvas" aria-pressed="false">ISOLATE ZONE</button><button id="vPopulateCanvas">POPULATE SELECTED ZONE ↗</button><button id="vSection" aria-pressed="false">CLIPPING PLANE</button><button id="vSectionMove" aria-pressed="false" hidden>ROTATE PLANE</button><button id="vUndo" disabled>UNDO / CTRL+Z</button><button id="vGhost" aria-pressed="false">GHOSTED</button><button id="vWire" aria-pressed="false">WIRE</button></div><div id="vPerspective" class="voro-canvas"><button id="vUploadPrompt" type="button">UPLOAD FLOOR CURVES</button></div><div class="viewer-footer">FULL BALLOONS / ROUNDED SURFACE UNION</div></section><aside><section class="panel"><div class="panel-heading">PLAN VIEW <small>02 / CELLS & SELECTED SEEDS</small></div><div id="vPlan" class="voro-plan"></div></section><section class="panel"><div class="panel-heading">CONTROL PANEL <small>03 / INDEPENDENT SIMULATION</small></div><div class="voro-controls"><label class="button" for="vBoundaryFile">IMPORT FLOOR CURVES .3DM ↗</label><input id="vBoundaryFile" type="file" accept=".3dm" hidden><p id="vBoundaryInfo" class="note"></p><label>Population zone<select id="vZone"></select></label><p id="vZoneInfo" class="note"></p><label><input id="vShowAllZones" type="checkbox"> Show all zones</label><select id="vSize" hidden><option value="160">160</option><option value="80" selected>80</option><option value="40">40</option></select>${fields.map(([id, label, value, min, max, step]) => `<div class="control"><label for="v_${id}">${label}</label><input id="vn_${id}" type="number" value="${value}" min="${min}" max="${max}" step="${step}" aria-label="${label}"><input id="v_${id}" type="range" value="${value}" min="${min}" max="${max}" step="${step}"></div>`).join("")}<button id="vGenerate" class="primary">POPULATE SELECTED ZONE ↗</button><button id="vPopulateFloor">POPULATE ALL ZONES ON THIS FLOOR ↗</button><button id="vPopulateBuilding">POPULATE ALL LOADED FLOORS ↗</button><div class="pair"><button id="vObj">EXPORT .OBJ</button><button id="v3dm">EXPORT .3DM</button></div><button id="vSave">SAVE SETTINGS & DATA</button><label class="button" for="vLoad">OPEN VORONOI PROJECT</label><input hidden id="vLoad" type="file" accept=".json"><details class="mesh-details"><summary>MESH DETAILS</summary><pre id="vReport" class="iteration-report">Generate an enclosure to check its mesh.</pre></details></div></section></aside></div><div class="status-bar" id="vStatus" role="status">Ready to generate.</div>`;
+  pane.innerHTML = `<div class="voro-layout"><section class="panel"><div class="panel-heading"><span>PERSPECTIVE <small>01 / VORONOI BALLOONS</small></span><button id="vFit">FIT ↗</button></div><div class="canvas-tools"><button id="vRoof" aria-pressed="true">ENCLOSURE</button><button id="vSpheres" aria-pressed="false">BALLOONS</button><button id="vPickZone" aria-pressed="false">PICK ZONE</button><button id="vIsolateCanvas" aria-pressed="false">ISOLATE ZONE</button><button id="vPopulateCanvas">POPULATE SELECTED ZONE ↗</button><button id="vSection" aria-pressed="false">CLIPPING PLANE</button><button id="vSectionMove" aria-pressed="false" hidden>ROTATE PLANE</button><button id="vUndo" disabled>UNDO / CTRL+Z</button><button id="vGhost" aria-pressed="false">GHOSTED</button><button id="vWire" aria-pressed="false">WIRE</button></div><div id="vPerspective" class="voro-canvas"><button id="vUploadPrompt" type="button">UPLOAD FLOOR CURVES</button></div><div class="viewer-footer">FULL BALLOONS / ROUNDED SURFACE UNION</div></section><aside><section class="panel"><div class="panel-heading">PLAN VIEW <small>02 / CELLS & SELECTED SEEDS</small></div><div id="vPlan" class="voro-plan"></div></section><section class="panel"><div class="panel-heading">CONTROL PANEL <small>03 / INDEPENDENT SIMULATION</small></div><div class="voro-controls"><label class="button" for="vBoundaryFile">IMPORT FLOOR CURVES .3DM ↗</label><input id="vBoundaryFile" type="file" accept=".3dm" hidden><p id="vBoundaryInfo" class="note"></p><label>Population zone<select id="vZone"></select></label><p id="vZoneInfo" class="note"></p><label><input id="vShowAllZones" type="checkbox"> Show all zones</label><select id="vSize" hidden><option value="160">160</option><option value="80" selected>80</option><option value="40">40</option></select>${fields.map(([id, label, value, min, max, step]) => `<div class="control"><label for="v_${id}">${label}</label><input id="vn_${id}" type="number" value="${value}" min="${min}" max="${max}" step="${step}" aria-label="${label}"><input id="v_${id}" type="range" value="${value}" min="${min}" max="${max}" step="${step}"></div>`).join("")}<button id="vGenerate" class="primary">POPULATE SELECTED ZONE ↗</button><div class="pair"><button id="vObj">EXPORT .OBJ</button><button id="v3dm">EXPORT .3DM</button></div><button id="vSave">SAVE SETTINGS & DATA</button><label class="button" for="vLoad">OPEN VORONOI PROJECT</label><input hidden id="vLoad" type="file" accept=".json"><details class="mesh-details"><summary>MESH DETAILS</summary><pre id="vReport" class="iteration-report">Generate an enclosure to check its mesh.</pre></details></div></section></aside></div><div class="status-bar" id="vStatus" role="status">Ready to generate.</div>`;
   for (const id of ["index", "selected", "smoothing"])
     pane.querySelector("#vn_" + id).closest(".control").hidden = true;
   const stages = [
@@ -1814,8 +1813,6 @@ export function initVoronoi(
   function generate(populate = false) {
     if (pending || (!boundary && !legacyRectangle)) return;
     const previousZones = [...populatedZones];
-    if (["floor", "prepare", "preview"].includes(populate) && boundary)
-      populatedZones = populateAllZones(parameters()).populatedZones;
     if (populate === true && boundary && !populatedZones.includes(activeZone))
       populatedZones.push(activeZone);
     zoneUI(false);
@@ -1855,13 +1852,7 @@ export function initVoronoi(
         return;
       }
       result = data.result;
-      if (populate === true || populate === "floor" || populate === "preview") {
-        if (populate === "floor") {
-          showAllZones = true;
-          isolateZone = false;
-          $("vIsolateZone").checked = false;
-          zoneUI(false);
-        }
+      if (populate === true || populate === "preview") {
         if (timer) {
           clearInterval(timer);
           timer = null;
@@ -2030,76 +2021,6 @@ export function initVoronoi(
     generate();
   };
   $("vGenerate").onclick = $("vPopulateCanvas").onclick = () => generate(true);
-  $("vPopulateFloor").onclick = () => {
-    if (!boundary) {
-      $("vStatus").textContent = "Import a zoned floor outline first.";
-      return;
-    }
-    generate("floor");
-  };
-  $("vPopulateBuilding").onclick = async () => {
-    if (pending) return;
-    stashFloor();
-    const next = structuredClone(floorState),
-      targets = next.filter((f) => f.snapshot?.params.boundary);
-    if (!targets.length) {
-      $("vStatus").textContent =
-        "Import at least one zoned floor outline first.";
-      return;
-    }
-    setPending(true);
-    editing?.setBusy(true);
-    const locked = [...pane.querySelectorAll("input,button,select")].map(
-      (el) => [el, el.disabled],
-    );
-    locked.forEach(([el]) => (el.disabled = true));
-    const batchWorker = workerFactory();
-    let cancelBatch;
-    try {
-      for (const f of targets) {
-        $("vStatus").textContent = `Populating all zones on ${f.name}…`;
-        const savedParams = { ...f.snapshot.params };
-        delete savedParams.ceilingZ;
-        const params = populateAllZones({
-          ...savedParams,
-          directCells: true,
-          ...floorHeightLimit(next.indexOf(f), savedParams.boundary),
-        });
-        const built = await new Promise((resolve, reject) => {
-          cancellations.delete(cancelBatch);
-          cancelBatch = () => reject(Error("Building population cancelled."));
-          cancellations.add(cancelBatch);
-          batchWorker.onmessage = ({ data }) =>
-            data.error
-              ? reject(Error(`${f.name}: ${data.error}`))
-              : resolve(data.result);
-          batchWorker.onerror = (e) => reject(Error(e.message));
-          batchWorker.postMessage({ id: 1, action: "voronoi", params });
-        });
-        f.snapshot.params = params;
-        f.snapshot.result = built;
-        f.snapshot.stage = 4;
-        f.snapshot.view.showAllZones = true;
-      }
-      next.forEach((f, i) => Object.assign(floorState[i], f));
-      isolateZone = false;
-      $("vIsolateZone").checked = false;
-      setPending(false);
-      restoreFloor(floorState[activeFloor].snapshot);
-      queueAutosave();
-      $("vStatus").textContent =
-        `All zones populated across ${targets.length} loaded floor(s). Existing edits retained.`;
-    } catch (e) {
-      $("vStatus").textContent = e.message;
-    } finally {
-      cancellations.delete(cancelBatch);
-      batchWorker.terminate();
-      setPending(false);
-      locked.forEach(([el, disabled]) => (el.disabled = disabled));
-      editing?.setBusy(false);
-      draw();
-    }
-  };
   $("vFit").onclick = fit;
   $("vRoof").onclick = () => {
     resetStepMenu = false;
