@@ -40,17 +40,40 @@ export function zonedVoronoiBuild(m, p) {
   if (
     configs.reduce(
       (s, c, i) =>
-        s + (enabled.has(i) ? (p.unclippedBalloons ? c.count : c.selected) : 0),
+        s +
+        (enabled.has(i)
+          ? p.directCells || p.unclippedBalloons
+            ? c.count
+            : c.selected
+          : 0),
       0,
     ) > 200
   )
-    throw Error("Use at most 200 selected balloons across all zones.");
+    throw Error("Use at most 200 Voronoi cells across the populated zones.");
   const results = [];
   for (let i = 0; i < boundary.zones.length; i++) {
     const z = boundary.zones[i],
       cfg = configs[i],
       offset = i * ZONE_STRIDE,
       bounds = loopBounds(z.loops);
+    if (p.directCells && !enabled.has(i)) {
+      const raw = { positions: new Float64Array(), indices: new Uint32Array() };
+      results.push({
+        raw,
+        points: [],
+        cells: [],
+        cellLoops: [],
+        ids: [],
+        spheres: [],
+        loops: [],
+        components: 0,
+        volume: 0,
+        params: { ...cfg, directCells: true, floor: p.floor },
+        quality: meshQuality(raw),
+        closed: false,
+      });
+      continue;
+    }
     const remap = (object) =>
       Object.fromEntries(
         Object.entries(object ?? {})
@@ -63,6 +86,7 @@ export function zonedVoronoiBuild(m, p) {
       results.push(
         voronoiBuild(m, {
           ...cfg,
+          ...(p.directCells ? { directCells: true } : {}),
           selected: p.unclippedBalloons ? cfg.count : cfg.selected,
           unclippedBalloons: !!p.unclippedBalloons,
           clipFloor: !!p.clipFloor,

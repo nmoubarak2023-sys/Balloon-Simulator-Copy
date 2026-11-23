@@ -9,6 +9,8 @@ import { MeshBVH } from "three-mesh-bvh";
 import { meshQuality, signedVolume } from "./mesh-quality.js";
 export function voronoiBuild(m, p) {
   validateVoronoiLifecycle(p);
+  if (p.directCells !== undefined && typeof p.directCells !== "boolean")
+    throw Error("Invalid Voronoi cell population mode.");
   if (
     p.spatialType !== undefined &&
     !["studio", "custom"].includes(p.spatialType)
@@ -19,8 +21,6 @@ export function voronoiBuild(m, p) {
     height: h,
     count,
     seed,
-    index,
-    selected,
     radiusMin,
     radiusMax,
     radiusSeed,
@@ -28,6 +28,10 @@ export function voronoiBuild(m, p) {
     spacing,
     smoothing,
   } = p;
+  // Old project files can still replay their saved nearest-cluster recipe.
+  // New population requests create one cell and balloon per requested center.
+  const index = p.directCells ? 0 : p.index;
+  const selected = p.directCells ? count : p.selected;
   if (
     !Object.entries(p)
       .filter(
@@ -48,6 +52,7 @@ export function voronoiBuild(m, p) {
             "unclippedBottoms",
             "rotations",
             "spatialType",
+            "directCells",
           ].includes(k),
       )
       .every(([, v]) => Number.isFinite(v)) ||
@@ -196,14 +201,16 @@ export function voronoiBuild(m, p) {
       );
     });
   }
-  const selectedIds = points
-    .map((a, i) => ({
-      i,
-      d: (a[0] - points[index][0]) ** 2 + (a[1] - points[index][1]) ** 2,
-    }))
-    .sort((a, b) => a.d - b.d || a.i - b.i)
-    .slice(0, selected)
-    .map((a) => a.i);
+  const selectedIds = p.directCells
+    ? points.map((_, i) => i)
+    : points
+        .map((a, i) => ({
+          i,
+          d: (a[0] - points[index][0]) ** 2 + (a[1] - points[index][1]) ** 2,
+        }))
+        .sort((a, b) => a.d - b.d || a.i - b.i)
+        .slice(0, selected)
+        .map((a) => a.i);
   const rr = random(radiusSeed),
     generated = selectedIds.map((id) => {
       const edit = p.edits?.[id];

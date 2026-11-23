@@ -48,8 +48,8 @@ export function initVoronoi(
   realistic.hidden = true;
   existing.after(pane, realistic);
   const fields = [
-    ["count", "Seed point count", 40, 1, 150, 1],
-    ["seed", "Point seed", 42, 0, 9999, 1],
+    ["count", "VORONOI CELL COUNT", 40, 1, 150, 1],
+    ["seed", "CELL LAYOUT SEED", 42, 0, 9999, 1],
     ["index", "Anchor point index (0 based)", 0, 0, 39, 1],
     ["selected", "Nearest points selected", 17, 1, 40, 1],
     ["radiusMin", "Radius min (ft)", 15, 1, 60, 0.5],
@@ -74,15 +74,14 @@ export function initVoronoi(
     "radiusMax",
     "radiusSeed",
   ];
-  pane.innerHTML = `<div class="voro-layout"><section class="panel"><div class="panel-heading"><span>PERSPECTIVE <small>01 / VORONOI BALLOONS</small></span><button id="vFit">FIT ↗</button></div><div class="canvas-tools"><button id="vRoof" aria-pressed="true">ENCLOSURE</button><button id="vSpheres" aria-pressed="false">BALLOONS</button><button id="vPickZone" aria-pressed="false">PICK ZONE</button><button id="vIsolateCanvas" aria-pressed="false">ISOLATE ZONE</button><button id="vPopulateCanvas">POPULATE SELECTED ZONE ↗</button><button id="vPickAnchor" aria-pressed="false">PICK ANCHOR CENTER</button><button id="vSection" aria-pressed="false">CLIPPING PLANE</button><button id="vSectionMove" aria-pressed="false" hidden>ROTATE PLANE</button><button id="vUndo" disabled>UNDO / CTRL+Z</button><button id="vGhost" aria-pressed="false">GHOSTED</button><button id="vWire" aria-pressed="false">WIRE</button></div><div id="vPerspective" class="voro-canvas"><button id="vUploadPrompt" type="button">UPLOAD FLOOR CURVES</button></div><div class="viewer-footer">FULL BALLOONS / ROUNDED SURFACE UNION</div></section><aside><section class="panel"><div class="panel-heading">PLAN VIEW <small>02 / CELLS & SELECTED SEEDS</small></div><div id="vPlan" class="voro-plan"></div></section><section class="panel"><div class="panel-heading">CONTROL PANEL <small>03 / INDEPENDENT SIMULATION</small></div><div class="voro-controls"><label class="button" for="vBoundaryFile">IMPORT FLOOR CURVES .3DM ↗</label><input id="vBoundaryFile" type="file" accept=".3dm" hidden><p id="vBoundaryInfo" class="note"></p><label>Population zone<select id="vZone"></select></label><p id="vZoneInfo" class="note"></p><label><input id="vShowAllZones" type="checkbox"> Show all zones</label><select id="vSize" hidden><option value="160">160</option><option value="80" selected>80</option><option value="40">40</option></select>${fields.map(([id, label, value, min, max, step]) => `<div class="control"><label for="v_${id}">${label}</label><input id="vn_${id}" type="number" value="${value}" min="${min}" max="${max}" step="${step}" aria-label="${label}"><input id="v_${id}" type="range" value="${value}" min="${min}" max="${max}" step="${step}"></div>`).join("")}<button id="vGenerate" class="primary">POPULATE SELECTED ZONE ↗</button><button id="vPopulateFloor">POPULATE ALL ZONES ON THIS FLOOR ↗</button><button id="vPopulateBuilding">POPULATE ALL LOADED FLOORS ↗</button><div class="pair"><button id="vObj">EXPORT .OBJ</button><button id="v3dm">EXPORT .3DM</button></div><button id="vSave">SAVE SETTINGS & DATA</button><label class="button" for="vLoad">OPEN VORONOI PROJECT</label><input hidden id="vLoad" type="file" accept=".json"><details class="mesh-details"><summary>MESH DETAILS</summary><pre id="vReport" class="iteration-report">Generate an enclosure to check its mesh.</pre></details></div></section></aside></div><div class="status-bar" id="vStatus" role="status">Ready to generate.</div>`;
+  pane.innerHTML = `<div class="voro-layout"><section class="panel"><div class="panel-heading"><span>PERSPECTIVE <small>01 / VORONOI BALLOONS</small></span><button id="vFit">FIT ↗</button></div><div class="canvas-tools"><button id="vRoof" aria-pressed="true">ENCLOSURE</button><button id="vSpheres" aria-pressed="false">BALLOONS</button><button id="vPickZone" aria-pressed="false">PICK ZONE</button><button id="vIsolateCanvas" aria-pressed="false">ISOLATE ZONE</button><button id="vPopulateCanvas">POPULATE SELECTED ZONE ↗</button><button id="vSection" aria-pressed="false">CLIPPING PLANE</button><button id="vSectionMove" aria-pressed="false" hidden>ROTATE PLANE</button><button id="vUndo" disabled>UNDO / CTRL+Z</button><button id="vGhost" aria-pressed="false">GHOSTED</button><button id="vWire" aria-pressed="false">WIRE</button></div><div id="vPerspective" class="voro-canvas"><button id="vUploadPrompt" type="button">UPLOAD FLOOR CURVES</button></div><div class="viewer-footer">FULL BALLOONS / ROUNDED SURFACE UNION</div></section><aside><section class="panel"><div class="panel-heading">PLAN VIEW <small>02 / CELLS & SELECTED SEEDS</small></div><div id="vPlan" class="voro-plan"></div></section><section class="panel"><div class="panel-heading">CONTROL PANEL <small>03 / INDEPENDENT SIMULATION</small></div><div class="voro-controls"><label class="button" for="vBoundaryFile">IMPORT FLOOR CURVES .3DM ↗</label><input id="vBoundaryFile" type="file" accept=".3dm" hidden><p id="vBoundaryInfo" class="note"></p><label>Population zone<select id="vZone"></select></label><p id="vZoneInfo" class="note"></p><label><input id="vShowAllZones" type="checkbox"> Show all zones</label><select id="vSize" hidden><option value="160">160</option><option value="80" selected>80</option><option value="40">40</option></select>${fields.map(([id, label, value, min, max, step]) => `<div class="control"><label for="v_${id}">${label}</label><input id="vn_${id}" type="number" value="${value}" min="${min}" max="${max}" step="${step}" aria-label="${label}"><input id="v_${id}" type="range" value="${value}" min="${min}" max="${max}" step="${step}"></div>`).join("")}<button id="vGenerate" class="primary">POPULATE SELECTED ZONE ↗</button><button id="vPopulateFloor">POPULATE ALL ZONES ON THIS FLOOR ↗</button><button id="vPopulateBuilding">POPULATE ALL LOADED FLOORS ↗</button><div class="pair"><button id="vObj">EXPORT .OBJ</button><button id="v3dm">EXPORT .3DM</button></div><button id="vSave">SAVE SETTINGS & DATA</button><label class="button" for="vLoad">OPEN VORONOI PROJECT</label><input hidden id="vLoad" type="file" accept=".json"><details class="mesh-details"><summary>MESH DETAILS</summary><pre id="vReport" class="iteration-report">Generate an enclosure to check its mesh.</pre></details></div></section></aside></div><div class="status-bar" id="vStatus" role="status">Ready to generate.</div>`;
   for (const id of ["index", "selected", "smoothing"])
     pane.querySelector("#vn_" + id).closest(".control").hidden = true;
-  pane.querySelector("#vPickAnchor").hidden = true;
   const stages = [
     "Boundary",
-    "Seed points",
+    "CELL CENTERS",
     "Voronoi cells",
-    "Nearest cluster",
+    "CELLS",
     "Zone-clipped balloons",
     "Floor-clipped balloons",
     "United floor footprint",
@@ -107,7 +106,6 @@ export function initVoronoi(
       .join("") +
     '</select><button id="vNext">NEXT →</button><button id="vPlay">PLAY STEPS</button><p id="vStepDescription" class="note"></p>';
   pane.querySelector(".canvas-tools").after(stepbar);
-  let anchorDown;
   let resetStepMenu = false;
   let stage = 0,
     timer;
@@ -406,6 +404,7 @@ export function initVoronoi(
             z = b.elevation ?? 0,
             span = Math.max(b.bounds.width, b.bounds.height);
           const params = {
+            directCells: true,
             unclippedBalloons: true,
             clipFloor: true,
             clipFloorEdge: true,
@@ -1444,14 +1443,19 @@ export function initVoronoi(
         group.add(mesh);
       }
       if (r && stage >= 1 && stage <= 3) {
-        const chosen = new Set(stage >= 3 ? r.ids : []),
-          z = r.params.floor + 0.06;
+        const z = r.params.floor + 0.06;
         r.points.forEach((p, id) => {
           if (!p) return;
+          if (
+            r.params.boundary &&
+            r.params.populatedZones &&
+            !r.params.populatedZones.includes(Math.floor(id / ZONE_STRIDE))
+          )
+            return;
           const dot = new T.Mesh(
             new T.CircleGeometry(r.params.width * 0.006, 12),
             new T.MeshBasicMaterial({
-              color: chosen.has(id) ? 0xdc24f4 : 0x21e0ed,
+              color: 0x21e0ed,
               side: T.DoubleSide,
             }),
           );
@@ -1469,9 +1473,9 @@ export function initVoronoi(
                   loop.map((p) => new T.Vector3(...p, z)),
                 ),
                 new T.LineBasicMaterial({
-                  color: chosen.has(id) ? 0xdc24f4 : 0x21e0ed,
+                  color: 0x21e0ed,
                   transparent: true,
-                  opacity: chosen.has(id) ? 1 : 0.45,
+                  opacity: 0.6,
                 }),
               );
               line.userData.otherFloor = true;
@@ -1510,9 +1514,9 @@ export function initVoronoi(
         });
     const descriptions = [
       "Imported outer perimeter and subdivision zones.",
-      "Deterministic candidate centers inside the rectangle.",
-      "Original Voronoi territories for every seed.",
-      "Click a Voronoi center to set the anchor index and rebuild its nearest cluster. Drag empty space to orbit.",
+      "One center for each requested Voronoi cell, placed inside the zone.",
+      "The requested number of Voronoi cells partitions the zone.",
+      "Every generated center belongs to a Voronoi cell. Drag to orbit.",
       "Full balloons grow from seeds inside the imported curves; zone and perimeter edges do not cut them. The underside is clipped at the floor plate.",
       "Sphere preview split at the horizontal floor plane.",
       "Union of original sphere sections, filled as one floor footprint.",
@@ -1524,7 +1528,6 @@ export function initVoronoi(
     $("vPrevious").disabled = menuStage === 0;
     $("vNext").disabled = menuStage === 7;
     if (!result) return;
-    $("vPickAnchor").setAttribute("aria-pressed", stage >= 1 && stage <= 3);
     $("vRoof").setAttribute("aria-pressed", stage === 7);
     $("vSpheres").setAttribute("aria-pressed", stage === 4 || stage === 5);
     const visibleZone =
@@ -1646,9 +1649,14 @@ export function initVoronoi(
           ),
         ),
     );
-    const chosen = new Set(stage >= 3 ? result.ids : []);
     result.cells.forEach((cell, i) => {
       if (!cell.length || !visible(i)) return;
+      if (
+        result.params.boundary &&
+        result.params.populatedZones &&
+        !result.params.populatedZones.includes(Math.floor(i / ZONE_STRIDE))
+      )
+        return;
       for (const outline of result.cellLoops?.[i]?.length
         ? result.cellLoops[i]
         : [cell]) {
@@ -1657,9 +1665,9 @@ export function initVoronoi(
             outline.map((p) => new T.Vector3(...p, result.params.floor + 0.08)),
           ),
           new T.LineBasicMaterial({
-            color: chosen.has(i) ? 0xdc24f4 : 0x21e0ed,
+            color: 0x21e0ed,
             transparent: true,
-            opacity: chosen.has(i) ? 1 : 0.45,
+            opacity: 0.6,
           }),
         );
         if (stage >= 2) diagram.add(line);
@@ -1669,28 +1677,8 @@ export function initVoronoi(
         }
       }
       const dot = new T.Mesh(
-        new T.CircleGeometry(
-          result.params.width *
-            (i ===
-            (result.params.boundary
-              ? activeZone * ZONE_STRIDE + zoneConfigs[activeZone].index
-              : result.params.index)
-              ? 0.01
-              : 0.006),
-          16,
-        ),
-        new T.MeshBasicMaterial({
-          side: T.DoubleSide,
-          color:
-            i ===
-            (result.params.boundary
-              ? activeZone * ZONE_STRIDE + zoneConfigs[activeZone].index
-              : result.params.index)
-              ? 0xffffff
-              : chosen.has(i)
-                ? 0xdc24f4
-                : 0x21e0ed,
-        }),
+        new T.CircleGeometry(result.params.width * 0.006, 16),
+        new T.MeshBasicMaterial({ side: T.DoubleSide, color: 0x21e0ed }),
       );
       dot.position.set(...result.points[i], result.params.floor + 0.1);
       if (stage >= 1) diagram.add(dot);
@@ -1789,6 +1777,7 @@ export function initVoronoi(
     if (boundary) {
       storeZone();
       return {
+        directCells: true,
         unclippedBalloons: true,
         clipFloor: true,
         clipFloorEdge: true,
@@ -1809,6 +1798,7 @@ export function initVoronoi(
     }
     const width = Number($("vSize").value);
     return {
+      directCells: true,
       unclippedBalloons: true,
       clipFloor: true,
       clipFloorEdge: true,
@@ -1893,7 +1883,7 @@ export function initVoronoi(
           degenerateFaces: q.degenerateFaces,
           quadFaces: quadMesh(result.raw).quads.length / 4,
           volumeCubicFeet: result.volume,
-          selectedOriginalIndices: result.ids,
+          generatedCellIds: result.ids,
           zones: result.zones?.map((z) => ({
             name: z.name,
             balloons: z.balloons,
@@ -2001,92 +1991,6 @@ export function initVoronoi(
       true,
     );
   });
-  const anchorCanvas = renderers[0].domElement;
-  function centerAt(e) {
-    if (!result || pending || stage < 1 || stage > 3) return null;
-    const rect = anchorCanvas.getBoundingClientRect();
-    camera.updateMatrixWorld();
-    let nearest = null,
-      distance = 16;
-    result.points.forEach((point, index) => {
-      if (
-        !Array.isArray(point) ||
-        (boundary &&
-          !showAllZones &&
-          Math.floor(index / ZONE_STRIDE) !== activeZone)
-      )
-        return;
-      const [x, y] = point;
-      const p = new T.Vector3(x, y, result.params.floor + 0.1).project(camera);
-      if (p.z < -1 || p.z > 1) return;
-      const d = Math.hypot(
-        e.clientX - rect.left - ((p.x + 1) * rect.width) / 2,
-        e.clientY - rect.top - ((1 - p.y) * rect.height) / 2,
-      );
-      if (d < distance) {
-        nearest = index;
-        distance = d;
-      }
-    });
-    return nearest;
-  }
-  anchorCanvas.addEventListener(
-    "pointerdown",
-    (e) => {
-      anchorDown = null;
-      if (e.button !== 0) return;
-      const index = centerAt(e);
-      if (index === null) return;
-      anchorDown = { index, x: e.clientX, y: e.clientY };
-      e.stopImmediatePropagation();
-    },
-    true,
-  );
-  anchorCanvas.addEventListener(
-    "pointerup",
-    (e) => {
-      const down = anchorDown;
-      anchorDown = null;
-      if (!down) return;
-      e.stopImmediatePropagation();
-      if (
-        pending ||
-        Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5 ||
-        centerAt(e) !== down.index
-      )
-        return;
-      if (boundary) {
-        storeZone();
-        activeZone = Math.floor(down.index / ZONE_STRIDE);
-        zoneUI();
-      }
-      $("v_index").value = $("vn_index").value = boundary
-        ? down.index % ZONE_STRIDE
-        : down.index;
-      stage = 2;
-      draw();
-      generate();
-    },
-    true,
-  );
-  anchorCanvas.addEventListener(
-    "pointercancel",
-    () => {
-      anchorDown = null;
-    },
-    true,
-  );
-  $("vPickAnchor").onclick = () => {
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-      $("vPlay").textContent = "PLAY STEPS";
-    }
-    stage = 2;
-    draw();
-    $("vStatus").textContent =
-      "Click a Voronoi center in the perspective view to set its anchor index. The white center is the current anchor.";
-  };
   fields.forEach(([id]) => {
     const range = $("v_" + id),
       number = $("vn_" + id);
@@ -2158,6 +2062,7 @@ export function initVoronoi(
         delete savedParams.ceilingZ;
         const params = populateAllZones({
           ...savedParams,
+          directCells: true,
           ...floorHeightLimit(next.indexOf(f), savedParams.boundary),
         });
         const built = await new Promise((resolve, reject) => {
