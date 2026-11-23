@@ -1,5 +1,9 @@
 # Independent Balloon Build copy
 
+EDIT ZONE BOUNDARIES is an opt-in tool in the Voronoi canvas toolbar. Hover/click a shared edge in either view, or select the adjoining zone pair in its BOUNDARY menu. OPEN preserves existing behavior; DEFINED caps the vaults at the neighboring zone; SOFT tapers the roof toward a shared valley before capping. Adjust transition width and valley height for SOFT. Existing roofs below the requested valley height are retained rather than raised. Floorplate boundaries are separate and are not selectable by this tool.
+
+PREVIEW BOUNDARY builds the two adjacent populated zones in a separate orbitable preview without modifying the building. APPLY BOUNDARY saves one setting for both sides, creates an undo checkpoint, and rebuilds affected geometry; unrelated zone meshes are reused. Failed application rolls back. Changing a boundary requires unfreezing balloons in the adjacent zones. SHOW BOUNDARY TYPES toggles colored/dashed guide lines, which are not exported. Boundary settings are stored in project JSON, autosave, and history. Existing projects default to OPEN and do not change automatically. Review previously placed supports after changing the roof.
+
 LOBBY in ZONE LAYOUT generates one balloon spanning the selected zone's bounding proportions. Set its height, preview, then APPLY ZONE LAYOUT. Applying it clears old balloon overrides only in that zone (with an undo checkpoint); subsequent individual editing is available. The footprint covers the zone but can extend beyond subdivision boundaries, consistent with the existing balloon behavior; floorplate clipping remains available.
 
 This directory contains a separate copy of the current local website, including the unpublished trumpet-shaped column update. Edit files here for the copy. The original directory is `../balloon-build`.

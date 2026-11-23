@@ -3,6 +3,8 @@ import {
   releaseCollaborationPoints,
 } from "./collaboration-layout.js";
 import { clearLobbyOverrides } from "./studio-layout.js";
+import { mountZoneBoundaries } from "./zone-boundary-ui.js";
+import { sharedBoundaries, boundaryRules } from "./zone-boundaries.js";
 import { initBoolean } from "./boolean-ui.js";
 import { initMeasure } from "./voronoi-measure.js";
 import { queueAutosave } from "./autosave.js";
@@ -125,7 +127,7 @@ export function initVoronoi(
   }
   function setPending(value) {
     pending = value;
-    if($("vZone")) $("vZone").disabled=value || !boundary;
+    if ($("vZone")) $("vZone").disabled = value || !boundary;
     updateLoading();
   }
   const collaboration = mountCollaborationLayout({
@@ -139,7 +141,8 @@ export function initVoronoi(
       if (!boundary) throw Error("IMPORT A ZONED FLOOR FIRST.");
       remember(captureUndo());
       storeZone();
-      if(settings.spatialType==='lobby') editing?.load(clearLobbyOverrides(editing.save(),activeZone));
+      if (settings.spatialType === "lobby")
+        editing?.load(clearLobbyOverrides(editing.save(), activeZone));
       Object.assign(zoneConfigs[activeZone], settings);
       zoneUI();
       generate(true);
@@ -216,11 +219,13 @@ export function initVoronoi(
     zoneUI(false);
   }
   $("vZone").onchange = () => {
-    zoneSteps[activeZone]=stage;
+    zoneSteps[activeZone] = stage;
     storeZone();
     activeZone = Number($("vZone").value);
-    stage=[0,1,2,4,7].includes(zoneSteps[activeZone]) ? zoneSteps[activeZone] : 0;
-    resetStepMenu=false;
+    stage = [0, 1, 2, 4, 7].includes(zoneSteps[activeZone])
+      ? zoneSteps[activeZone]
+      : 0;
+    resetStepMenu = false;
     zoneUI();
     draw();
     editing?.selectZone(activeZone);
@@ -395,13 +400,28 @@ export function initVoronoi(
         cancellations.delete(cancelPartition);
         partitionWorker.terminate();
       }
-      columns.reset();walls.reset();boolean.reset();showRealistic.reset();
-      floorState.forEach(f=>{f.snapshot=null;f.visible=true;});
-      activeFloor=0;activeZone=0;zoneSteps={};populatedZones=[];result=null;
-      isolateZone=false;$("vIsolateZone").checked=false;showAllZones=true;
+      columns.reset();
+      walls.reset();
+      boolean.reset();
+      showRealistic.reset();
+      floorState.forEach((f) => {
+        f.snapshot = null;
+        f.visible = true;
+      });
+      activeFloor = 0;
+      activeZone = 0;
+      zoneSteps = {};
+      populatedZones = [];
+      result = null;
+      isolateZone = false;
+      $("vIsolateZone").checked = false;
+      showAllZones = true;
       editing?.load(null);
-      worker?.terminate();worker=undefined;workerResult=undefined;
-      journal.entries.length=0;$("vUndo").disabled=true;
+      worker?.terminate();
+      worker = undefined;
+      workerResult = undefined;
+      journal.entries.length = 0;
+      $("vUndo").disabled = true;
       floorUI();
       if (boundaries.length === 1) await importBoundary(boundaries[0]);
       else {
@@ -528,7 +548,7 @@ export function initVoronoi(
     floorState[activeFloor].snapshot = captureFloor();
   }
   function captureFloor() {
-    zoneSteps[activeZone]=stage;
+    zoneSteps[activeZone] = stage;
     return {
       params: parameters(),
       result,
@@ -681,6 +701,7 @@ export function initVoronoi(
   let editing;
   let worker,
     workerResult,
+    boundaryUndo,
     result,
     pending = false,
     mode = "roof",
@@ -905,10 +926,10 @@ export function initVoronoi(
     const entry = journal.pop();
     $("vUndo").disabled = !journal.length;
     if (!entry) return;
-    restoreWorkspace(entry,true);
+    restoreWorkspace(entry, true);
     $("vStatus").textContent = "Last workspace action undone.";
   }
-  function restoreWorkspace(entry,preserveCamera=false) {
+  function restoreWorkspace(entry, preserveCamera = false) {
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -929,8 +950,14 @@ export function initVoronoi(
     degreeEntry.hidden = true;
     updateSectionPlane();
     syncSectionButtons();
-    restoreFloor(floorState[activeFloor].snapshot, false, false, true,preserveCamera);
-    if(!preserveCamera) {
+    restoreFloor(
+      floorState[activeFloor].snapshot,
+      false,
+      false,
+      true,
+      preserveCamera,
+    );
+    if (!preserveCamera) {
       camera.position.fromArray(state.cameraPosition);
       orbit.target.fromArray(state.orbitTarget);
     }
@@ -1614,7 +1641,11 @@ export function initVoronoi(
       const mesh = new T.Mesh(smooth, mat);
       if (wire) mesh.add(quadWire(raw));
       group.add(mesh);
-    } else if (stage === 4 || stage === 5 || (stage < 4 && boundary && !isolateZone && showAllZones)) {
+    } else if (
+      stage === 4 ||
+      stage === 5 ||
+      (stage < 4 && boundary && !isolateZone && showAllZones)
+    ) {
       const { width: w, height: h, floor } = result.params;
       const planes = [
         new T.Plane(new T.Vector3(1, 0, 0), 0),
@@ -1624,7 +1655,9 @@ export function initVoronoi(
         new T.Plane(new T.Vector3(0, 0, 1), -floor),
       ];
       renderers[0].localClippingEnabled = true;
-      for (const s of result.spheres.filter((s) => visible(s.id) && (stage >= 4 || s.zone !== activeZone))) {
+      for (const s of result.spheres.filter(
+        (s) => visible(s.id) && (stage >= 4 || s.zone !== activeZone),
+      )) {
         const mesh = new T.Mesh(
           s.raw ? geometry(s.raw) : new T.SphereGeometry(s.radius, 64, 40),
           new T.MeshPhysicalMaterial({
@@ -1695,7 +1728,8 @@ export function initVoronoi(
     );
     result.cells.forEach((cell, i) => {
       if (!cell.length || !visible(i)) return;
-      if(boundary && stage < 4 && Math.floor(i/ZONE_STRIDE)!==activeZone) return;
+      if (boundary && stage < 4 && Math.floor(i / ZONE_STRIDE) !== activeZone)
+        return;
       if (
         result.params.boundary &&
         result.params.populatedZones &&
@@ -1871,6 +1905,8 @@ export function initVoronoi(
       workerResult = undefined;
     }
     const cancelGeneration = () => {
+      const boundaryBefore = boundaryUndo;
+      boundaryUndo = null;
       cancellations.delete(cancelGeneration);
       worker.terminate();
       worker = undefined;
@@ -1886,6 +1922,7 @@ export function initVoronoi(
         zoneUI(false);
       }
       fitNext = false;
+      if (boundaryBefore) restoreWorkspace(boundaryBefore, true);
       draw();
       $("vStatus").textContent = "Generation cancelled.";
     };
@@ -1897,10 +1934,16 @@ export function initVoronoi(
       if (data.error) {
         editing?.rejectBuild();
         editing?.setBusy(false);
+        if (boundaryUndo) {
+          const before = boundaryUndo;
+          boundaryUndo = null;
+          restoreWorkspace(before, true);
+        }
         $("vStatus").textContent = data.error;
         return;
       }
       result = data.result;
+      boundaryUndo = null;
       workerResult = result;
       if (populate === true || populate === "preview") {
         if (timer) {
@@ -1910,7 +1953,7 @@ export function initVoronoi(
         }
         resetStepMenu = false;
         stage = requestedStage ?? 4;
-        zoneSteps[activeZone]=stage;
+        zoneSteps[activeZone] = stage;
         mode = "spheres";
       }
       stashFloor();
@@ -1952,6 +1995,11 @@ export function initVoronoi(
       editing?.rejectBuild();
       editing?.setBusy(false);
       setPending(false);
+      if (boundaryUndo) {
+        const before = boundaryUndo;
+        boundaryUndo = null;
+        restoreWorkspace(before, true);
+      }
       $("vGenerate").disabled = $("vPopulateCanvas").disabled = false;
       $("vStatus").textContent = e.message;
     };
@@ -2100,12 +2148,12 @@ export function initVoronoi(
     draw();
   };
   function showZoneStep(nextStage) {
-    if(pending) return;
-    stage=nextStage;
-    resetStepMenu=false;
-    if(boundary && stage>0 && !populatedZones.includes(activeZone)) {
+    if (pending) return;
+    stage = nextStage;
+    resetStepMenu = false;
+    if (boundary && stage > 0 && !populatedZones.includes(activeZone)) {
       remember(captureUndo());
-      generate(true,stage);
+      generate(true, stage);
     } else draw();
   }
   $("vStage").onchange = () => {
@@ -2217,7 +2265,11 @@ export function initVoronoi(
           version: 2,
           ...accepted(),
           editing: editing?.save(),
-          view: { activeZone, showAllZones, zoneSteps: { ...zoneSteps, [activeZone]: stage } },
+          view: {
+            activeZone,
+            showAllZones,
+            zoneSteps: { ...zoneSteps, [activeZone]: stage },
+          },
         },
         (_, v) => (ArrayBuffer.isView(v) ? Array.from(v) : v),
       ),
@@ -2278,7 +2330,11 @@ export function initVoronoi(
         format: "saved-voronoi-geometry",
         result: accepted(),
         editing: editing.save(),
-        view: { activeZone, showAllZones, zoneSteps: { ...zoneSteps, [activeZone]: stage } },
+        view: {
+          activeZone,
+          showAllZones,
+          zoneSteps: { ...zoneSteps, [activeZone]: stage },
+        },
         stage,
         wire,
         ghosted,
@@ -2461,6 +2517,79 @@ export function initVoronoi(
       index ? [group, diagram, sectionCuts] : [group, sectionCuts],
     floorHeight: () => Number($("vn_floor").value) || 0,
   });
+  function boundaryCandidate(id, rule) {
+    const edge = sharedBoundaries(boundary).find((e) => e.id === id);
+    if (!edge) throw Error("SELECT A SHARED BOUNDARY ON THE EDITING FLOOR.");
+    const frozen = Object.keys(editing?.save().frozen ?? {});
+    if (
+      frozen.some((id) =>
+        edge.zones.includes(Math.floor(Number(id) / ZONE_STRIDE)),
+      )
+    )
+      throw Error(
+        "UNFREEZE BALLOONS IN THE TWO ADJACENT ZONES BEFORE CHANGING THEIR BOUNDARY.",
+      );
+    const next = {
+      ...boundary,
+      edgeTreatments: { ...boundary.edgeTreatments, [id]: rule },
+    };
+    edge.zones.forEach((zone) =>
+      boundaryRules(next, next.edgeTreatments, zone),
+    );
+    return { next, edge };
+  }
+  const boundaryEditor = mountZoneBoundaries({
+    pane,
+    renderers,
+    cameras: [camera, plan],
+    getState: () => ({
+      boundary,
+      floor: Number($("vn_floor").value),
+      busy: pending || backgroundTasks > 0,
+    }),
+    preview: async (id, rule) => {
+      if (pending || backgroundTasks)
+        throw Error("WAIT FOR THE CURRENT OPERATION.");
+      const { next, edge } = boundaryCandidate(id, rule),
+        params = {
+          ...parameters(),
+          boundary: next,
+          populatedZones: populatedZones.filter((i) => edge.zones.includes(i)),
+        };
+      if (!params.populatedZones.length)
+        throw Error("POPULATE AN ADJACENT ZONE BEFORE PREVIEWING.");
+      const previewWorker = workerFactory();
+      let cancel;
+      backgroundTasks++;
+      updateLoading();
+      try {
+        return await new Promise((resolve, reject) => {
+          cancel = () => reject(Error("BOUNDARY PREVIEW CANCELLED."));
+          cancellations.add(cancel);
+          previewWorker.onerror = (e) => reject(Error(e.message));
+          previewWorker.onmessage = ({ data }) =>
+            data.error
+              ? reject(Error(data.error))
+              : data.result.raw.indices.length
+                ? resolve(data.result.raw)
+                : reject(Error("NO GEOMETRY AT THIS BOUNDARY."));
+          previewWorker.postMessage({ id: 1, action: "voronoi", params });
+        });
+      } finally {
+        cancellations.delete(cancel);
+        previewWorker.terminate();
+        backgroundTasks--;
+        updateLoading();
+      }
+    },
+    apply: (id, rule) => {
+      const { next } = boundaryCandidate(id, rule);
+      boundaryUndo = captureUndo();
+      remember(boundaryUndo);
+      boundary = next;
+      generate();
+    },
+  });
   function frame() {
     requestAnimationFrame(frame);
     if (pane.hidden) return;
@@ -2476,6 +2605,7 @@ export function initVoronoi(
       renderers[0].autoClear = true;
     }
     measure.render(0);
+    boundaryEditor.render(0);
     editing?.beforePlan();
     renderers[1].localClippingEnabled = true;
     sectionOutline.visible = sectionGizmo.visible = false;
@@ -2488,6 +2618,7 @@ export function initVoronoi(
     if (result) editing?.renderPlan(renderers[1], plan);
     editing?.afterPlan();
     measure.render(1);
+    boundaryEditor.render(1);
     if ($("vZoneLabels").checked) {
       for (const { anchor, labels, labelDirection } of zoneAnnotations) {
         labels.forEach((label, index) => {

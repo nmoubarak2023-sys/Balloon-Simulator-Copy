@@ -1,4 +1,5 @@
 import { voronoiBuild } from "./voronoi-engine.js";
+import { boundaryRules } from "./zone-boundaries.js";
 import { loopBounds } from "./zones.js";
 import { meshQuality, signedVolume, prepareMesh } from "./mesh-quality.js";
 export const ZONE_STRIDE = 150;
@@ -19,6 +20,7 @@ export function defaultZoneSettings(boundary, floorIndex = 0) {
   });
 }
 function zoneParameters(p, i) {
+  const rules = boundaryRules(p.boundary, p.boundary.edgeTreatments, i);
   const cfg = p.zoneSettings[i],
     z = p.boundary.zones[i],
     offset = i * ZONE_STRIDE,
@@ -38,6 +40,7 @@ function zoneParameters(p, i) {
       .map((id) => id - offset);
   return {
     ...cfg,
+    ...(rules.length ? { zoneBoundaryRules: rules } : {}),
     ...(p.directCells ? { directCells: true } : {}),
     selected: p.unclippedBalloons ? cfg.count : cfg.selected,
     unclippedBalloons: !!p.unclippedBalloons,
@@ -273,6 +276,24 @@ export function zonedVoronoiBuild(m, p, { previous, editingZone } = {}) {
       const cleaned = union.simplify(1e-4);
       union.delete();
       union = cleaned;
+    }
+    // Coincident trimmed boundary caps can leave zero-scale numerical solids
+    // after the final union. Keep every architectural component; discard only
+    // dust below one trillionth of the assembled volume in this opt-in path.
+    if (
+      Object.values(boundary.edgeTreatments ?? {}).some(
+        (rule) => rule.mode !== "open",
+      )
+    ) {
+      const parts = union.decompose(),
+        epsilon = Math.max(1e-10, Math.abs(union.volume()) * 1e-12);
+      const keep = parts.filter((part) => Math.abs(part.volume()) > epsilon);
+      if (keep.length && keep.length < parts.length) {
+        const clean = m.Manifold.union(keep);
+        union.delete();
+        union = clean;
+      }
+      parts.forEach((part) => part.delete());
     }
     const mesh = union.getMesh(),
       positions = new Float64Array(mesh.numVert * 3);

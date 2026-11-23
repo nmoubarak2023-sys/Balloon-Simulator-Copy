@@ -1163,6 +1163,7 @@ footer {
   gap: 14px;
 }
 .collaboration-layout { display: grid; gap: 12px; border: 1px solid #28484f; padding: 12px; }
+.collaboration-layout[hidden] { display: none !important; }
 .collaboration-layout > summary { color: #80dce7; cursor: pointer; }
 .collaboration-layout label, .collaboration-layout [data-fields] { display: grid; gap: 8px; }
 .collaboration-layout [hidden] { display: none !important; }

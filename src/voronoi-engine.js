@@ -1,4 +1,8 @@
 import { studioLayout, lobbyZone } from "./studio-layout.js";
+import {
+  applyBoundaryRules,
+  connectedBoundaryBalloon,
+} from "./zone-boundaries.js";
 import { inLoops, loopBounds } from "./zones.js";
 import { validateVoronoiLifecycle } from "./voronoi-lifecycle.js";
 import { validBalloonEdit } from "./balloon-edit.js";
@@ -53,6 +57,7 @@ export function voronoiBuild(m, p) {
             "rotations",
             "spatialType",
             "directCells",
+            "zoneBoundaryRules",
           ].includes(k),
       )
       .every(([, v]) => Number.isFinite(v)) ||
@@ -439,6 +444,15 @@ export function voronoiBuild(m, p) {
                 }),
               );
             }
+            if (!savedRaw && p.zoneBoundaryRules?.length)
+              solid = applyBoundaryRules(
+                m,
+                solid,
+                p.zoneBoundaryRules,
+                floor,
+                own,
+                s.center,
+              );
             if (prism && !savedRaw) solid = own(solid.intersect(prism));
             if (solid.isEmpty())
               throw Error(
@@ -448,6 +462,7 @@ export function voronoiBuild(m, p) {
               ? !!s.analyticSurface
               : !pressure && !(p.popEvents?.length && p.popPressure > 0);
             if (rotation) s.analyticSurface = false;
+            if (p.zoneBoundaryRules?.length) s.analyticSurface = false;
             const full = solid;
             if (p.clipFloor && !openBottom.has(s.id))
               solid = own(solid.trimByPlane([0, 0, 1], floor));
@@ -504,6 +519,8 @@ export function voronoiBuild(m, p) {
                 indices: new Uint32Array(untrimmed.triVerts),
               };
             }
+            if (!savedRaw && p.zoneBoundaryRules?.length && !solid.isEmpty())
+              solid = connectedBoundaryBalloon(solid, s.center, own);
             const mesh = solid.getMesh(),
               g = new T.BufferGeometry();
             g.setAttribute(
