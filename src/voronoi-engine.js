@@ -1,4 +1,4 @@
-import { studioLayout } from "./studio-layout.js";
+import { studioLayout, lobbyZone } from "./studio-layout.js";
 import { inLoops, loopBounds } from "./zones.js";
 import { validateVoronoiLifecycle } from "./voronoi-lifecycle.js";
 import { validBalloonEdit } from "./balloon-edit.js";
@@ -13,7 +13,7 @@ export function voronoiBuild(m, p) {
     throw Error("Invalid Voronoi cell population mode.");
   if (
     p.spatialType !== undefined &&
-    !["studio", "custom"].includes(p.spatialType)
+    !["studio", "custom", "lobby"].includes(p.spatialType)
   )
     throw Error("Unknown spatial type.");
   const {
@@ -131,6 +131,11 @@ export function voronoiBuild(m, p) {
     [x0, y0] = domainBounds.min;
   const rng = random(seed),
     points = [];
+  const lobby =
+    p.spatialType === "lobby" && domainLoops
+      ? lobbyZone(domainLoops, p.studioHeight ?? 12)
+      : null;
+  if (lobby) points.push([lobby.lobbyX, lobby.lobbyY]);
   if (p.spatialType === "studio" && domainLoops)
     points.push(...studioLayout(domainLoops, p));
   if (p.spatialType === "studio" && domainLoops && points.length !== count)
@@ -218,7 +223,7 @@ export function voronoiBuild(m, p) {
       const elevation = p.domain?.elevation ?? 0;
       const clearance = p.ceilingZ - elevation;
       const height =
-        p.spatialType === "studio"
+        p.spatialType === "studio" || lobby
           ? Math.min(p.studioHeight ?? 12, clearance > 0 ? clearance : Infinity)
           : clearance;
       const verticalBase = height > 0 ? Math.min(1, height / radius) : 1;
@@ -226,7 +231,11 @@ export function voronoiBuild(m, p) {
         id,
         axisScale: [
           (edit?.[4] ?? 1) *
-            (p.spatialType === "studio" ? (p.studioElongation ?? 2) : 1),
+            (lobby
+              ? lobby.lobbyRX / radius
+              : p.spatialType === "studio"
+                ? (p.studioElongation ?? 2)
+                : 1),
           edit?.[5] ?? 1,
           verticalBase * (edit?.[6] ?? 1),
         ],

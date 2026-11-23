@@ -1,4 +1,55 @@
 import { inLoops, loopBounds } from "./zones.js";
+export function clearLobbyOverrides(state, zone) {
+  const outside=id=>Number(id)<zone*150 || Number(id)>=(zone+1)*150;
+  const clean={...state};
+  for(const key of ['edits','frozen','rotations']) clean[key]=Object.fromEntries(Object.entries(state[key]??{}).filter(([id])=>outside(id)));
+  for(const key of ['popped','unclippedEdges','unclippedBottoms']) clean[key]=(state[key]??[]).filter(outside);
+  clean.popEvents=(state.popEvents??[]).filter(e=>e.zone!==zone);
+  return clean;
+}
+export function lobbyZone(loops, height = 12) {
+  if (!Number.isFinite(height) || height < 1)
+    throw Error("ENTER A HEIGHT LIMIT OF AT LEAST 1 FT.");
+  const b = loopBounds(loops),
+    mid = b.min.map((v, i) => (v + b.max[i]) / 2);
+  let center = inLoops(mid, loops) ? mid : null,
+    best = Infinity;
+  if (!center)
+    for (let j = 0; j < 40; j++)
+      for (let i = 0; i < 40; i++) {
+        const p = [
+          b.min[0] + ((i + 0.5) * b.width) / 40,
+          b.min[1] + ((j + 0.5) * b.height) / 40,
+        ];
+        const d = Math.hypot(p[0] - mid[0], p[1] - mid[1]);
+        if (inLoops(p, loops) && d < best) {
+          center = p;
+          best = d;
+        }
+      }
+  if (!center) throw Error("THIS ZONE IS TOO NARROW FOR A LOBBY BALLOON.");
+  const rx =
+    Math.max(...loops.flat().map((p) => Math.abs(p[0] - center[0]))) *
+    Math.SQRT2 *
+    1.02;
+  const ry =
+    Math.max(...loops.flat().map((p) => Math.abs(p[1] - center[1]))) *
+    Math.SQRT2 *
+    1.02;
+  return {
+    spatialType: "lobby",
+    count: 1,
+    selected: 1,
+    index: 0,
+    studioHeight: height,
+    lobbyX: center[0],
+    lobbyY: center[1],
+    lobbyRX: rx,
+    lobbyRY: ry,
+    radiusMin: ry,
+    radiusMax: ry,
+  };
+}
 export function studioLayout(
   loops,
   { studioAngle = 0, studioBay = 20, studioElongation = 2 } = {},

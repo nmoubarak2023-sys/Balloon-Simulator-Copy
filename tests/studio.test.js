@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Module from "manifold-3d";
-import { studioLayout } from "../src/studio-layout.js";
+import { studioLayout, lobbyZone, clearLobbyOverrides } from "../src/studio-layout.js";
 import { voronoiBuild } from "../src/voronoi-engine.js";
 import {
   collaborationZone,
@@ -44,6 +44,30 @@ const params = {
   clipFloor: true,
   ceilingZ: 25,
 };
+test("lobby creates exactly one zone-spanning balloon with a height limit and editable transforms", () => {
+  const cleaned=clearLobbyOverrides({frozen:{0:{},150:{}},popped:[0,150],edits:{0:[],150:[]}},0);
+  assert.deepEqual(Object.keys(cleaned.frozen),['150']);assert.deepEqual(cleaned.popped,[150]);assert.deepEqual(Object.keys(cleaned.edits),['150']);
+  const cfg = lobbyZone(loops, 10);
+  const p = { ...params, ...cfg, directCells: true };
+  const r = voronoiBuild(m, p);
+  assert.equal(r.spheres.length, 1);
+  assert.equal(r.cells.length, 1);
+  for (const [x, y] of loops[0])
+    assert.ok(
+      ((x - cfg.lobbyX) / cfg.lobbyRX) ** 2 +
+        ((y - cfg.lobbyY) / cfg.lobbyRY) ** 2 <
+        1,
+    );
+  const balloon = r.spheres[0];
+  assert.ok(balloon.radius * balloon.axisScale[2] <= 10.00001);
+  assert.equal(r.quality.boundaryEdges, 0);
+  const edited = voronoiBuild(m, {
+    ...p,
+    edits: { 0: [2, 0, 0, 1, 1, 1, 1.2] },
+  });
+  assert.equal(edited.spheres[0].center[0], balloon.center[0] + 2);
+  assert.ok(edited.spheres[0].axisScale[2] > balloon.axisScale[2]);
+});
 test("collaboration opt-in leaves custom geometry exactly unchanged", () => {
   const legacy = { ...params };
   for (const key of [

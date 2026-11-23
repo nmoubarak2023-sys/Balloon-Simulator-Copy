@@ -1,5 +1,7 @@
 # Independent Balloon Build copy
 
+LOBBY in ZONE LAYOUT generates one balloon spanning the selected zone's bounding proportions. Set its height, preview, then APPLY ZONE LAYOUT. Applying it clears old balloon overrides only in that zone (with an undo checkpoint); subsequent individual editing is available. The footprint covers the zone but can extend beyond subdivision boundaries, consistent with the existing balloon behavior; floorplate clipping remains available.
+
 This directory contains a separate copy of the current local website, including the unpublished trumpet-shaped column update. Edit files here for the copy. The original directory is `../balloon-build`.
 
 Double-click **Start-Website-Copy.cmd** to start the editable local website and open it in your browser. The first launch uses http://127.0.0.1:5183/. If that port is occupied, the launcher tries another port and remembers the working address. Keep its server window open while using the local copy. The launcher uses the local Node.js runtime in `.local-runtime`, when present, so it can run independently of Codex updates.

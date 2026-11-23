@@ -2,6 +2,7 @@ import {
   mountCollaborationLayout,
   releaseCollaborationPoints,
 } from "./collaboration-layout.js";
+import { clearLobbyOverrides } from "./studio-layout.js";
 import { initBoolean } from "./boolean-ui.js";
 import { initMeasure } from "./voronoi-measure.js";
 import { queueAutosave } from "./autosave.js";
@@ -138,6 +139,7 @@ export function initVoronoi(
       if (!boundary) throw Error("IMPORT A ZONED FLOOR FIRST.");
       remember(captureUndo());
       storeZone();
+      if(settings.spatialType==='lobby') editing?.load(clearLobbyOverrides(editing.save(),activeZone));
       Object.assign(zoneConfigs[activeZone], settings);
       zoneUI();
       generate(true);

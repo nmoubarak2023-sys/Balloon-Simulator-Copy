@@ -1,4 +1,4 @@
-import { studioLayout } from "./studio-layout.js";
+import { studioLayout, lobbyZone } from "./studio-layout.js";
 
 export function collaborationZone(loops, settings) {
   if (!Number.isFinite(settings.studioHeight) || settings.studioHeight < 1)
@@ -18,7 +18,10 @@ export function collaborationZone(loops, settings) {
 // Native point controls keep their original behavior: explicitly changing
 // count/seed leaves the generated grid instead of failing or ignoring input.
 export function releaseCollaborationPoints(config, field) {
-  if (config?.spatialType === "studio" && ["count", "seed"].includes(field)) {
+  if (
+    ["studio", "lobby"].includes(config?.spatialType) &&
+    ["count", "seed"].includes(field)
+  ) {
     config.spatialType = "custom";
     return true;
   }
@@ -29,7 +32,7 @@ export function mountCollaborationLayout({ anchor, getState, apply }) {
   const root = document.createElement("details");
   root.className = "collaboration-layout";
   root.open = true;
-  root.innerHTML = `<summary>ZONE LAYOUT</summary><label>LAYOUT<select data-layout><option value="custom">EXISTING / CUSTOM</option><option value="studio">COLLABORATION OFFICE</option></select></label><div data-fields><label>MAIN DIRECTION (DEGREES)<input data-field="studioAngle" type="number" value="0"></label><label>BAY SPACING (FT)<input data-field="studioBay" type="number" min="2" value="20"></label><label>VAULT ELONGATION<input data-field="studioElongation" type="number" min="1" max="4" step=".1" value="2"></label><label>GENERATED HEIGHT LIMIT (FT)<input data-field="studioHeight" type="number" min="1" value="12"></label></div><button type="button" data-preview>PREVIEW LAYOUT</button><button type="button" data-apply>APPLY ZONE LAYOUT</button><svg viewBox="0 0 240 240" aria-label="COLLABORATION LAYOUT PREVIEW" hidden></svg><output role="status"></output>`;
+  root.innerHTML = `<summary>ZONE LAYOUT</summary><label>LAYOUT<select data-layout><option value="custom">EXISTING / CUSTOM</option><option value="studio">COLLABORATION OFFICE</option><option value="lobby">LOBBY</option></select></label><div data-fields><label>MAIN DIRECTION (DEGREES)<input data-field="studioAngle" type="number" value="0"></label><label>BAY SPACING (FT)<input data-field="studioBay" type="number" min="2" value="20"></label><label>VAULT ELONGATION<input data-field="studioElongation" type="number" min="1" max="4" step=".1" value="2"></label><label>GENERATED HEIGHT LIMIT (FT)<input data-field="studioHeight" type="number" min="1" value="12"></label></div><button type="button" data-preview>PREVIEW LAYOUT</button><button type="button" data-apply>APPLY ZONE LAYOUT</button><svg viewBox="0 0 240 240" aria-label="COLLABORATION LAYOUT PREVIEW" hidden></svg><output role="status"></output>`;
   anchor.after(root);
   const q = (selector) => root.querySelector(selector),
     type = q("[data-layout]"),
@@ -49,8 +52,11 @@ export function mountCollaborationLayout({ anchor, getState, apply }) {
       ]),
     );
   function visibility() {
-    q("[data-fields]").hidden = type.value !== "studio";
-    q("[data-preview]").disabled = type.value !== "studio";
+    q("[data-fields]").hidden = !["studio", "lobby"].includes(type.value);
+    q("[data-preview]").disabled = !["studio", "lobby"].includes(type.value);
+    for (const key of ["studioAngle", "studioBay", "studioElongation"])
+      q(`[data-field="${key}"]`).closest("label").hidden =
+        type.value === "lobby";
     svg.setAttribute("hidden", "");
     svg.replaceChildren();
     output.textContent = "";
@@ -58,7 +64,9 @@ export function mountCollaborationLayout({ anchor, getState, apply }) {
   function refresh() {
     const state = getState(),
       cfg = state.config ?? {};
-    type.value = cfg.spatialType === "studio" ? "studio" : "custom";
+    type.value = ["studio", "lobby"].includes(cfg.spatialType)
+      ? cfg.spatialType
+      : "custom";
     for (const [k, v] of Object.entries(defaults))
       q(`[data-field="${k}"]`).value = cfg[k] ?? v;
     root.hidden = !state.loops;
@@ -73,8 +81,14 @@ export function mountCollaborationLayout({ anchor, getState, apply }) {
   function preview() {
     const state = getState();
     if (!state.loops) throw Error("IMPORT A ZONED FLOOR FIRST.");
-    const cfg = collaborationZone(state.loops, settings()),
-      points = studioLayout(state.loops, cfg);
+    const cfg =
+        type.value === "lobby"
+          ? lobbyZone(state.loops, settings().studioHeight)
+          : collaborationZone(state.loops, settings()),
+      points =
+        type.value === "lobby"
+          ? [[cfg.lobbyX, cfg.lobbyY]]
+          : studioLayout(state.loops, cfg);
     const all = state.loops.flat(),
       xs = all.map((p) => p[0]),
       ys = all.map((p) => p[1]),
@@ -102,7 +116,7 @@ export function mountCollaborationLayout({ anchor, getState, apply }) {
       svg.append(el);
     };
     for (const loop of state.loops) polygon(loop, "none", "#355c62");
-    const angle = (cfg.studioAngle * Math.PI) / 180,
+    const angle = ((cfg.studioAngle ?? 0) * Math.PI) / 180,
       c = Math.cos(angle),
       s = Math.sin(angle),
       r = cfg.radiusMin;
@@ -110,7 +124,12 @@ export function mountCollaborationLayout({ anchor, getState, apply }) {
       polygon(
         Array.from({ length: 64 }, (_, i) => {
           const a = (i * Math.PI) / 32,
-            dx = Math.cos(a) * r * cfg.studioElongation,
+            dx =
+              Math.cos(a) *
+              r *
+              (cfg.spatialType === "lobby"
+                ? cfg.lobbyRX / cfg.lobbyRY
+                : cfg.studioElongation),
             dy = Math.sin(a) * r;
           return [center[0] + dx * c - dy * s, center[1] + dx * s + dy * c];
         }),
@@ -131,8 +150,9 @@ export function mountCollaborationLayout({ anchor, getState, apply }) {
     try {
       if (getState().busy)
         throw Error("WAIT FOR THE CURRENT OPERATION TO FINISH.");
-      const cfg =
-        type.value === "studio" ? preview() : { spatialType: "custom" };
+      const cfg = ["studio", "lobby"].includes(type.value)
+        ? preview()
+        : { spatialType: "custom" };
       if (
         !confirm(
           "REGENERATE THIS ZONE? AN UNDO CHECKPOINT WILL BE SAVED. REVIEW EXISTING COLUMNS AND WALLS IF RIDGES MOVE.",
