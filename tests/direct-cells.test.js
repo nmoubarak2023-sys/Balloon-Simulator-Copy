@@ -9,6 +9,7 @@ import {
 } from "../src/zoned-voronoi.js";
 import { partitionCurves } from "../src/zones.js";
 import { signedVolume } from "../src/mesh-quality.js";
+import { resetZonePopulation } from "../src/zone-population.js";
 const m = await Module();
 m.setup();
 const loops = [
@@ -237,4 +238,74 @@ test("populating a second zone adds only that zone and retains the first zone", 
     second.zones.map((z) => z.balloons),
     [3, 3],
   );
+});
+
+test("resetting an old automatically populated floor removes all legacy balloons; the next population contains only the chosen zone", () => {
+  const boundary = partitionCurves([
+    { closed: true, points: loops[0] },
+    {
+      points: [
+        [20, 0],
+        [20, 25],
+      ],
+    },
+  ]);
+  const configs = defaultZoneSettings(boundary).map((c) => ({
+    ...c,
+    count: 3,
+    selected: 3,
+    index: 0,
+  }));
+  const p = {
+    ...params,
+    boundary,
+    zoneSettings: configs,
+    populatedZones: [0, 1],
+  };
+  delete p.domain;
+  const oldResult = zonedVoronoiBuild(m, p);
+  const old = {
+    params: p,
+    result: oldResult,
+    editing: {
+      curves: [
+        [
+          [0, 0, 0],
+          [40, 25, 0],
+        ],
+      ],
+      frozen: { 0: oldResult.spheres[0] },
+      popped: [1],
+      edits: { 2: [1, 0, 0, 1] },
+    },
+    view: { activeZone: 1, showAllZones: true },
+    stage: 4,
+  };
+  const reset = resetZonePopulation(old);
+  assert.equal(reset.result, null);
+  assert.deepEqual(reset.params.populatedZones, []);
+  assert.deepEqual(reset.editing.frozen, {});
+  assert.deepEqual(reset.params.boundary, boundary);
+  assert.deepEqual(reset.params.zoneSettings, configs);
+  assert.deepEqual(reset.editing.curves, old.editing.curves);
+  assert.equal(
+    old.result.spheres.length,
+    6,
+    "original snapshot remains available for undo",
+  );
+  const empty = zonedVoronoiBuild(m, reset.params, {
+    previous: oldResult,
+    editingZone: 1,
+  });
+  assert.equal(empty.spheres.length, 0);
+  const one = zonedVoronoiBuild(
+    m,
+    { ...reset.params, populatedZones: [1] },
+    { previous: empty, editingZone: 1 },
+  );
+  assert.deepEqual(
+    one.zones.map((z) => z.balloons),
+    [0, 3],
+  );
+  assert.ok(one.spheres.every((s) => s.zone === 1));
 });

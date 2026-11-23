@@ -5,6 +5,7 @@ import {
 import { initBoolean } from "./boolean-ui.js";
 import { initMeasure } from "./voronoi-measure.js";
 import { queueAutosave } from "./autosave.js";
+import { resetZonePopulation } from "./zone-population.js";
 import { initRealistic } from "./realistic-ui.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
@@ -521,6 +522,33 @@ export function initVoronoi(
       ghosted,
     };
   }
+  const resetPopulation = document.createElement("button");
+  resetPopulation.type = "button";
+  resetPopulation.textContent = "RESET BALLOON POPULATION";
+  pane.querySelector(".mesh-details").append(resetPopulation);
+  resetPopulation.onclick = () => {
+    if (pending || backgroundTasks || !boundary) return;
+    if (
+      !confirm(
+        "REMOVE GENERATED BALLOONS FROM ALL LOADED FLOORS? FLOOR OUTLINES AND SETTINGS WILL STAY. UNDO RESTORES THE PREVIOUS BUILDING.",
+      )
+    )
+      return;
+    remember(captureUndo());
+    stashFloor();
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+      $("vPlay").textContent = "PLAY STEPS";
+    }
+    floorState.forEach((f) => {
+      if (f.snapshot) f.snapshot = resetZonePopulation(f.snapshot);
+    });
+    isolateZone = false;
+    $("vIsolateZone").checked = false;
+    restoreFloor(floorState[activeFloor].snapshot, false, true, true, true);
+    generate("prepare");
+  };
   function restoreFloor(
     snapshot,
     autoBuild = true,
