@@ -123,6 +123,7 @@ export function initVoronoi(
   }
   function setPending(value) {
     pending = value;
+    if($("vZone")) $("vZone").disabled=value || !boundary;
     updateLoading();
   }
   const collaboration = mountCollaborationLayout({
@@ -159,7 +160,7 @@ export function initVoronoi(
         : [new Option("Legacy rectangle", 0)]),
     );
     $("vZone").value = activeZone;
-    $("vZone").disabled = !boundary;
+    $("vZone").disabled = !boundary || pending;
     $("vShowAllZones").checked = showAllZones;
     $("vBoundaryInfo").textContent = boundary
       ? `${boundary.sourceName} · ${boundary.zones.length} zone(s) · feet${boundary.warnings?.length ? " · " + boundary.warnings.join(" ") : ""}`
@@ -213,6 +214,8 @@ export function initVoronoi(
   $("vZone").onchange = () => {
     storeZone();
     activeZone = Number($("vZone").value);
+    stage=populatedZones.includes(activeZone)?4:0;
+    resetStepMenu=false;
     zoneUI();
     draw();
     editing?.selectZone(activeZone);
@@ -1839,7 +1842,7 @@ export function initVoronoi(
       ...(editing?.settings() || {}),
     };
   }
-  function generate(populate = false) {
+  function generate(populate = false, requestedStage = null) {
     if (pending || (!boundary && !legacyRectangle)) return;
     const previousZones = [...populatedZones];
     if (populate === true && boundary && !populatedZones.includes(activeZone))
@@ -1898,7 +1901,7 @@ export function initVoronoi(
           $("vPlay").textContent = "PLAY STEPS";
         }
         resetStepMenu = false;
-        stage = 4;
+        stage = requestedStage ?? 4;
         mode = "spheres";
       }
       stashFloor();
@@ -2087,20 +2090,29 @@ export function initVoronoi(
     $("vSpheres").setAttribute("aria-pressed", true);
     draw();
   };
+  function showZoneStep(nextStage) {
+    if(pending) return;
+    stage=nextStage;
+    resetStepMenu=false;
+    if(boundary && stage>0 && !populatedZones.includes(activeZone)) {
+      remember(captureUndo());
+      generate(true,stage);
+    } else draw();
+  }
   $("vStage").onchange = () => {
     resetStepMenu = false;
     stage = Number($("vStage").value);
-    draw();
+    showZoneStep(stage);
   };
   $("vPrevious").onclick = () => {
     stage = [0, 1, 2, 4, 7][Math.max(0, [0, 1, 2, 4, 7].indexOf(stage) - 1)];
-    draw();
+    showZoneStep(stage);
   };
   $("vNext").onclick = () => {
     if (resetStepMenu) stage = 0;
     resetStepMenu = false;
     stage = [0, 1, 2, 4, 7][Math.min(4, [0, 1, 2, 4, 7].indexOf(stage) + 1)];
-    draw();
+    showZoneStep(stage);
   };
   $("vPlay").onclick = () => {
     if (timer) {
@@ -2114,7 +2126,7 @@ export function initVoronoi(
     draw();
     $("vPlay").textContent = "PAUSE";
     timer = setInterval(() => {
-      if (pane.hidden) return;
+      if (pane.hidden || pending) return;
       if (stage === 7) {
         clearInterval(timer);
         timer = null;
@@ -2122,7 +2134,7 @@ export function initVoronoi(
         return;
       }
       stage = [0, 1, 2, 4, 7][Math.min(4, [0, 1, 2, 4, 7].indexOf(stage) + 1)];
-      draw();
+      showZoneStep(stage);
     }, 1800);
   };
   $("vGhost").onclick = () => {
