@@ -59,9 +59,9 @@ export function boundaryRules(boundary, settings, zone) {
     .filter((e) => e.zones.includes(zone))
     .flatMap((e) => {
       const rule = settings?.[e.id];
-      if (!rule || rule.mode === "open") return [];
-      if (!["soft", "defined"].includes(rule.mode))
-        throw Error("UNKNOWN ZONE BOUNDARY TYPE.");
+      // Retired DEFINED settings load as OPEN, without destructive trimming.
+      if (!rule || rule.mode === "open" || rule.mode === "defined") return [];
+      if (rule.mode !== "soft") throw Error("UNKNOWN ZONE BOUNDARY TYPE.");
       const width = rule.width ?? 12,
         height = rule.height ?? 8;
       if (
@@ -152,14 +152,8 @@ export function applyBoundaryRules(m, solid, rules, floor, own, center) {
         }),
       );
     }
-    const bounds = solid.boundingBox(),
-      span = Math.max(1, bounds.max[2] - bounds.min[2]) + 10;
-    const cross = own(new m.CrossSection(rule.neighborLoops, "EvenOdd"));
-    const neighbor = own(
-      own(cross.extrude(span * 3)).translate([0, 0, bounds.min[2] - span]),
-    );
-    solid = own(solid.subtract(neighbor));
-    if (!solid.isEmpty()) solid = connectedBoundaryBalloon(solid, center, own);
+    // Preserve the overlapping footprint: cutting it at the shared edge creates
+    // a vertical cap all the way to the floor instead of an open roof valley.
   }
   return solid;
 }

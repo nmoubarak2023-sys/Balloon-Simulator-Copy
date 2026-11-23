@@ -85,7 +85,7 @@ test("open defaults are identical and a shared treatment rebuilds only its adjac
     boundary: { ...b, edgeTreatments: { [edge.id]: { mode: "open" } } },
   });
   assert.deepEqual(a.raw, open.raw, "no changes to existing OPEN geometry");
-  for (const mode of ["soft", "defined"]) {
+  for (const mode of ["soft"]) {
     const changed = zonedVoronoiBuild(
       m,
       {
@@ -132,60 +132,13 @@ test("shared boundary detection excludes the exterior and handles subdivided edg
   assert.equal(sharedBoundaries(b)[0].segments.length, 2);
   assert.deepEqual(boundaryRules(boundary, undefined, 0), []);
 });
-test("trimming a narrow neighboring zone does not leave a detached balloon fragment beyond it", () => {
-  const owned = [],
-    own = (s) => (owned.push(s), s);
-  try {
-    const sphere = own(own(m.Manifold.sphere(25, 64)).translate([10, 10, 0]));
-    const outer = own(
-      new m.CrossSection(
-        [
-          [
-            [0, 0],
-            [40, 0],
-            [40, 20],
-            [0, 20],
-          ],
-        ],
-        "EvenOdd",
-      ),
-    );
-    const source = own(sphere.intersect(own(outer.extrude(40))));
-    const cut = applyBoundaryRules(
-      m,
-      source,
-      [
-        {
-          mode: "defined",
-          segments: [
-            [
-              [20, 0],
-              [20, 20],
-            ],
-          ],
-          neighborLoops: [
-            [
-              [20, 0],
-              [22, 0],
-              [22, 20],
-              [20, 20],
-            ],
-          ],
-        },
-      ],
-      0,
-      own,
-      [10, 10, 0],
-    );
-    const parts = cut.decompose();
-    assert.equal(parts.length, 1);
-    parts.forEach((p) => p.delete());
-    assert.ok(cut.boundingBox().max[0] <= 20.0001);
-  } finally {
-    owned.reverse().forEach((s) => s.delete());
-  }
+test("retired defined settings safely use OPEN behavior", () => {
+  assert.deepEqual(
+    boundaryRules(boundary, { "0:1": { mode: "defined" } }, 0),
+    [],
+  );
 });
-for (const mode of ["open", "soft", "defined"])
+for (const mode of ["open", "soft"])
   test(
     mode + " uses closed geometry and the soft valley keeps a rounded crown",
     () => {
@@ -221,7 +174,10 @@ for (const mode of ["open", "soft", "defined"])
           assert.equal(solid, initial);
           assert.ok(solid.boundingBox().max[0] > 20);
         } else {
-          assert.ok(solid.boundingBox().max[0] <= 20.0001);
+          assert.ok(
+            solid.boundingBox().max[0] > 20,
+            "SOFT preserves overlap across the shared edge",
+          );
           const mesh = solid.getMesh(),
             roof = roofSampler({
               positions: mesh.vertProperties,
@@ -229,6 +185,10 @@ for (const mode of ["open", "soft", "defined"])
             });
           if (mode === "soft") {
             assert.ok(roof(19.99, 10) < 7.1);
+            assert.ok(
+              roof(20.01, 10) > 6.8,
+              "roof continues across the boundary at valley height",
+            );
             assert.ok(roof(10, 10) > 15);
           } else assert.ok(roof(19.99, 10) > 12);
         }

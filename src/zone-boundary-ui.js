@@ -17,7 +17,7 @@ export function mountZoneBoundaries({
   const panel = document.createElement("section");
   panel.className = "collaboration-layout";
   panel.hidden = true;
-  panel.innerHTML = `<strong>SHARED ZONE BOUNDARY</strong><label>BOUNDARY<select data-edge aria-label="SHARED ZONE BOUNDARY"></select></label><label>TYPE<select data-mode><option value="open">OPEN</option><option value="soft">SOFT</option><option value="defined">DEFINED</option></select></label><div data-soft><label>TRANSITION WIDTH (FT)<input data-width type="number" min="2" max="100" value="12"></label><label>VALLEY HEIGHT (FT)<input data-height type="number" min="1" max="100" value="8"></label></div><button data-preview>PREVIEW BOUNDARY</button><button data-apply>APPLY BOUNDARY</button><label><input data-guides type="checkbox"> SHOW BOUNDARY TYPES</label><div data-viewport style="height:220px;background:#000" hidden></div><output role="status">HOVER AND CLICK A SHARED EDGE IN EITHER VIEW.</output>`;
+  panel.innerHTML = `<strong>SHARED ZONE BOUNDARY</strong><label>BOUNDARY<select data-edge aria-label="SHARED ZONE BOUNDARY"></select></label><label>TYPE<select data-mode><option value="open">OPEN</option><option value="soft">SOFT</option></select></label><div data-soft><label>TRANSITION WIDTH (FT)<input data-width type="number" min="2" max="100" value="12"></label><label>VALLEY HEIGHT (FT)<input data-height type="number" min="1" max="100" value="8"></label></div><button data-preview>PREVIEW BOUNDARY</button><button data-apply>APPLY BOUNDARY</button><label><input data-guides type="checkbox"> SHOW BOUNDARY TYPES</label><div data-viewport style="height:220px;background:#000" hidden></div><output role="status">HOVER AND CLICK A SHARED EDGE IN EITHER VIEW.</output>`;
   pane.querySelector("#vZoneInfo").after(panel);
   const q = (s) => panel.querySelector(s),
     overlay = new T.Scene(),
@@ -52,7 +52,7 @@ export function mountZoneBoundaries({
       height: 8,
     };
     q("[data-edge]").value = id ?? "";
-    q("[data-mode]").value = rule.mode;
+    q("[data-mode]").value = rule.mode === "soft" ? "soft" : "open";
     q("[data-width]").value = rule.width ?? 12;
     q("[data-height]").value = rule.height ?? 8;
     q("[data-soft]").hidden = rule.mode !== "soft";
@@ -112,23 +112,18 @@ export function mountZoneBoundaries({
               ? 0xff5284
               : mode === "soft"
                 ? 0xff5284
-                : mode === "defined"
-                  ? 0xdc24f4
-                  : 0x21e0ed;
+                : 0x21e0ed;
       const g = new T.BufferGeometry().setFromPoints(
         edge.segments.flatMap((segment) =>
           segment.map((p) => new T.Vector3(...p, state.floor + 0.15)),
         ),
       );
-      const material =
-        mode === "defined"
-          ? new T.LineBasicMaterial({ color, depthTest: false })
-          : new T.LineDashedMaterial({
-              color,
-              depthTest: false,
-              dashSize: span * 0.012,
-              gapSize: span * 0.006,
-            });
+      const material = new T.LineDashedMaterial({
+        color,
+        depthTest: false,
+        dashSize: span * 0.012,
+        gapSize: span * 0.006,
+      });
       const line = new T.LineSegments(g, material);
       line.computeLineDistances();
       line.userData.edge = edge.id;
