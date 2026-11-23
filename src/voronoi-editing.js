@@ -991,7 +991,7 @@ export function createVoronoiEditing({
   };
   function update(nextMeshes, locked = false) {
     if (!locked) pendingOperation = null;
-    meshes = nextMeshes;
+    meshes = nextMeshes.filter(mesh => visibleZone === null || result()?.spheres.some(s => s.id === mesh.userData.balloonId && s.zone === visibleZone));
     busy = locked;
     transform.enabled = !locked;
     ui();
@@ -1093,10 +1093,12 @@ export function createVoronoiEditing({
       visibleZone = zone;
     },
     selectZone(zone) {
+      visibleZone = zone;
       selectedId =
-        result()?.spheres.find((s) => s.zone === zone)?.id ?? selectedId;
+        result()?.spheres.find((s) => s.zone === zone)?.id ?? null;
       ui();
       paint();
+      attach();
     },
     update,
     save: () => ({

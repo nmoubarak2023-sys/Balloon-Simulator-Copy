@@ -1565,7 +1565,7 @@ export function initVoronoi(
     const visible = (id) =>
       visibleZone === null || Math.floor(id / ZONE_STRIDE) === visibleZone;
     const preview = visibleZone === null ? result : result.zones[visibleZone];
-    editing?.setVisibleZone(visibleZone);
+    editing?.setVisibleZone(boundary ? activeZone : null);
     const balloonMeshes = [];
     if (stage === 7 || stage === 6) {
       const mat = new T.MeshPhysicalMaterial({
