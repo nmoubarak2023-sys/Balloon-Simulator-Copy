@@ -2457,6 +2457,7 @@ export function initVoronoi(
   const columns = initColumns(rhino, getFloorEnclosure, getSupportFloors);
   const walls = initColumns(rhino, getFloorEnclosure, getSupportFloors, {
     walls: true,
+    getReferenceColumns: (index) => columns.getPlacedColumns(index),
   });
   columns.pane.after(walls.pane);
   const showRealistic = initRealistic(realistic, () =>

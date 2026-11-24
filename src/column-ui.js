@@ -14,6 +14,7 @@ import {
 } from "./columns.js";
 import { meshQuality } from "./mesh-quality.js";
 import { isUndoShortcut } from "./history.js";
+import { queueAutosave } from "./autosave.js";
 import { inLoops } from "./zones.js";
 
 function zoneNameMesh(zone, elevation, active) {
@@ -76,7 +77,7 @@ export function initColumns(
   rhino,
   getVoronoi,
   getFloors,
-  { walls = false } = {},
+  { walls = false, getReferenceColumns = () => [] } = {},
 ) {
   const findSites = (source) => findSupportSites(source, walls);
   const buildSupport = (source, site, settings) =>
@@ -167,6 +168,22 @@ export function initColumns(
   let workingFloor,
     buildingFloors = [];
   const floorVisibility = new Map();
+  let showReferenceColumns = false;
+  let referenceToggle;
+  if (walls) {
+    const label = document.createElement("label");
+    label.className = "check";
+    referenceToggle = document.createElement("input");
+    referenceToggle.type = "checkbox";
+    referenceToggle.setAttribute("aria-label", "SHOW COLUMNS");
+    label.append(referenceToggle, " SHOW COLUMNS");
+    $("cGhost").after(label);
+    referenceToggle.onchange = () => {
+      showReferenceColumns = referenceToggle.checked;
+      displayFloors();
+      queueAutosave();
+    };
+  }
   const context = new T.Group();
   const scene = new T.Scene(),
     root = new T.Group(),
@@ -322,6 +339,9 @@ export function initColumns(
           }
         }
       }
+      if (walls && showReferenceColumns && isFloorVisible(floor.index))
+        for (const raw of getReferenceColumns(floor.index))
+          if (raw?.indices.length) addContextMesh(raw, 0xd2d5d8, 0.28);
       if (floor.index === workingFloor && source) continue;
       const saved = floorWork.get(floor.index);
       const raw = saved?.source.raw ?? floor.raw;
@@ -597,7 +617,8 @@ export function initColumns(
       try {
         const fresh = getVoronoi(index);
         if (
-          fresh.raw !== copiedEnclosure || source.siteVersion !== 2 ||
+          fresh.raw !== copiedEnclosure ||
+          source.siteVersion !== 2 ||
           (fresh.collisionRaw && !source.collisionRaw)
         ) {
           const placed = columns;
@@ -1113,8 +1134,18 @@ export function initColumns(
   return {
     pane,
     reset() {
-      floorWork.clear();floorVisibility.clear();columns=[];sites=[];source=undefined;workingFloor=undefined;selected=-1;history.length=0;
-      root.clear();context.clear();markers.clear();$("cUndo").disabled=true;
+      floorWork.clear();
+      floorVisibility.clear();
+      columns = [];
+      sites = [];
+      source = undefined;
+      workingFloor = undefined;
+      selected = -1;
+      history.length = 0;
+      root.clear();
+      context.clear();
+      markers.clear();
+      $("cUndo").disabled = true;
     },
     accept,
     processView: () => ({
@@ -1139,6 +1170,7 @@ export function initColumns(
         floorVisibility,
         isolateEditingFloor,
         showZones,
+        showReferenceColumns,
         ghost,
         wire,
         settings: settings(),
@@ -1158,6 +1190,8 @@ export function initColumns(
       isolateEditingFloor = data.isolateEditingFloor;
       $("cIsolateFloor").checked = isolateEditingFloor;
       showZones = data.showZones;
+      showReferenceColumns = data.showReferenceColumns === true;
+      if (referenceToggle) referenceToggle.checked = showReferenceColumns;
       if (walls) $("cZones").checked = showZones;
       ghost = data.ghost;
       wire = data.wire;

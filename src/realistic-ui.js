@@ -4,6 +4,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { addTechnicalFrames } from "./frames.js";
 import { geometry } from "./view.js";
+import { queueAutosave } from "./autosave.js";
 
 export function initRealistic(pane, getFloors) {
   pane.classList.add("voronoi-uppercase");
@@ -31,6 +32,42 @@ export function initRealistic(pane, getFloors) {
   <div id="realStatus" class="status-bar" role="status">IMPORT FLOOR CURVES IN VORONOI BALLOONS TO BEGIN.</div>`;
   addTechnicalFrames(pane);
   const $ = (id) => pane.querySelector("#" + id);
+  let hiddenFloors = new Set();
+  const floorControls = document.createElement("div");
+  floorControls.className = "floor-toolbar";
+  floorControls.setAttribute("aria-label", "Realistic mode floor visibility");
+  pane.prepend(floorControls);
+  function syncFloors() {
+    const floors = getFloors();
+    floorControls.replaceChildren();
+    const title = document.createElement("strong");
+    title.textContent = "BUILDING FLOORS";
+    floorControls.append(title);
+    for (const floor of floors) {
+      const label = document.createElement("label"),
+        input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !hiddenFloors.has(floor.index);
+      input.setAttribute("aria-label", "SHOW " + floor.name.toUpperCase());
+      input.onchange = () => {
+        if (input.checked) hiddenFloors.delete(floor.index);
+        else hiddenFloors.add(floor.index);
+        failedKey = undefined;
+        refresh();
+        queueAutosave();
+      };
+      label.append(input, " " + floor.name.toUpperCase());
+      floorControls.append(label);
+    }
+    for (const figure of scaleFigures.children) {
+      const floor = floors
+        .filter((f) => f.elevation <= figure.position.z + 0.1)
+        .sort((a, b) => b.elevation - a.elevation)[0];
+      figure.visible =
+        (!floor || !hiddenFloors.has(floor.index)) &&
+        !(figure === selectedFigure && eyeCamera);
+    }
+  }
   const viewport = $("realCanvas");
   const degrees = document.createElement("input");
   degrees.type = "number";
@@ -267,6 +304,7 @@ export function initRealistic(pane, getFloors) {
       rotation: pivot.quaternion.toArray(),
       mode: gumball?.getMode() ?? "translate",
       thickness: [$("realShell").value, $("realSlab").value],
+      hiddenFloors: [...hiddenFloors],
     };
   }
   function remember(before) {
@@ -277,6 +315,7 @@ export function initRealistic(pane, getFloors) {
   }
   function applyState(before) {
     if (gumball?.dragging || figureControl?.dragging) return;
+    hiddenFloors = new Set(before.hiddenFloors ?? []);
     leaveEyeView();
     selectFigure(undefined);
     scaleFigures.clear();
@@ -505,10 +544,12 @@ export function initRealistic(pane, getFloors) {
     requestAnimationFrame(frame);
   }
   function sourceRequest() {
-    const floors = getFloors().map((floor) => ({
-      ...floor,
-      meshId: idOf(floor.raw),
-    }));
+    const floors = getFloors()
+      .filter((floor) => !hiddenFloors.has(floor.index))
+      .map((floor) => ({
+        ...floor,
+        meshId: idOf(floor.raw),
+      }));
     const shellThickness = $("realShell").valueAsNumber;
     const slabThickness = $("realSlab").valueAsNumber;
     const key = JSON.stringify([
@@ -528,13 +569,13 @@ export function initRealistic(pane, getFloors) {
     return { kind: "build", key, floors, shellThickness, slabThickness };
   }
   function refresh() {
+    syncFloors();
     wanted = sourceRequest();
     if (!wanted.floors.length) {
       removeObject(mesh);
       removeObject(cap);
       if (mesh || cap) needsRender = true;
       mesh = cap = undefined;
-      fitted = false;
       modelKey = undefined;
       if (sectionOn) setSection(false);
       $("realFit").disabled =
@@ -543,7 +584,11 @@ export function initRealistic(pane, getFloors) {
           true;
       setFigureTool(false);
       scaleFigures.visible = false;
-      status("Import floor curves in Voronoi Balloons to begin.");
+      status(
+        getFloors().length
+          ? "ALL FLOORS HIDDEN. TURN ON A FLOOR ABOVE."
+          : "Import floor curves in Voronoi Balloons to begin.",
+      );
     }
     schedule();
   }
@@ -783,14 +828,22 @@ export function initRealistic(pane, getFloors) {
   show.loadSession = (data) => {
     restored = data;
   };
-  show.reset=()=>{
-    worker?.terminate();worker=undefined;inFlight=undefined;failedKey=undefined;
-    removeObject(mesh);removeObject(cap);mesh=cap=undefined;
-    scaleFigures.clear();figurePositions.length=0;needsRender=true;
-    restored={...readState(),figures:[],sectionOn:false};
-    history.entries.length=0;
-    fitted=false;
-    modelKey=undefined;
+  show.reset = () => {
+    hiddenFloors.clear();
+    worker?.terminate();
+    worker = undefined;
+    inFlight = undefined;
+    failedKey = undefined;
+    removeObject(mesh);
+    removeObject(cap);
+    mesh = cap = undefined;
+    scaleFigures.clear();
+    figurePositions.length = 0;
+    needsRender = true;
+    restored = { ...readState(), figures: [], sectionOn: false };
+    history.entries.length = 0;
+    fitted = false;
+    modelKey = undefined;
   };
   return show;
 }
