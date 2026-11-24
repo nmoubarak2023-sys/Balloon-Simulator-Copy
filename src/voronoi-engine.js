@@ -231,7 +231,13 @@ export function voronoiBuild(m, p) {
         p.spatialType === "studio" || lobby
           ? Math.min(p.studioHeight ?? 12, clearance > 0 ? clearance : Infinity)
           : clearance;
-      const verticalBase = height > 0 ? Math.min(1, height / radius) : 1;
+      // Layout height is independent of horizontal bay spacing/radius.
+      const verticalBase =
+        height > 0
+          ? p.spatialType === "studio" || lobby
+            ? height / radius
+            : Math.min(1, height / radius)
+          : 1;
       return {
         id,
         axisScale: [

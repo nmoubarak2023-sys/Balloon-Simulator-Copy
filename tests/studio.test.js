@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import Module from "manifold-3d";
-import { studioLayout, lobbyZone, clearLobbyOverrides } from "../src/studio-layout.js";
+import {
+  studioLayout,
+  lobbyZone,
+  clearLobbyOverrides,
+} from "../src/studio-layout.js";
 import { voronoiBuild } from "../src/voronoi-engine.js";
 import {
   collaborationZone,
@@ -45,8 +49,13 @@ const params = {
   ceilingZ: 25,
 };
 test("lobby creates exactly one zone-spanning balloon with a height limit and editable transforms", () => {
-  const cleaned=clearLobbyOverrides({frozen:{0:{},150:{}},popped:[0,150],edits:{0:[],150:[]}},0);
-  assert.deepEqual(Object.keys(cleaned.frozen),['150']);assert.deepEqual(cleaned.popped,[150]);assert.deepEqual(Object.keys(cleaned.edits),['150']);
+  const cleaned = clearLobbyOverrides(
+    { frozen: { 0: {}, 150: {} }, popped: [0, 150], edits: { 0: [], 150: [] } },
+    0,
+  );
+  assert.deepEqual(Object.keys(cleaned.frozen), ["150"]);
+  assert.deepEqual(cleaned.popped, [150]);
+  assert.deepEqual(Object.keys(cleaned.edits), ["150"]);
   const cfg = lobbyZone(loops, 10);
   const p = { ...params, ...cfg, directCells: true };
   const r = voronoiBuild(m, p);
@@ -61,10 +70,14 @@ test("lobby creates exactly one zone-spanning balloon with a height limit and ed
   const balloon = r.spheres[0];
   assert.ok(balloon.radius * balloon.axisScale[2] <= 10.00001);
   assert.equal(r.quality.boundaryEdges, 0);
-  for (const raw of [r.raw, r.spheres[0].raw, r.spheres[0].fullRaw].filter(Boolean))
+  for (const raw of [r.raw, r.spheres[0].raw, r.spheres[0].fullRaw].filter(
+    Boolean,
+  ))
     for (let i = 0; i < raw.positions.length; i += 3) {
       assert.ok(raw.positions[i] >= -0.0001 && raw.positions[i] <= 100.0001);
-      assert.ok(raw.positions[i + 1] >= -0.0001 && raw.positions[i + 1] <= 60.0001);
+      assert.ok(
+        raw.positions[i + 1] >= -0.0001 && raw.positions[i + 1] <= 60.0001,
+      );
     }
   const edited = voronoiBuild(m, {
     ...p,
@@ -74,7 +87,16 @@ test("lobby creates exactly one zone-spanning balloon with a height limit and ed
   assert.ok(edited.spheres[0].axisScale[2] > balloon.axisScale[2]);
 });
 test("lobby respects concave zone edges even with full balloons enabled", () => {
-  const concave = [[[0, 0], [100, 0], [100, 30], [50, 30], [50, 60], [0, 60]]];
+  const concave = [
+    [
+      [0, 0],
+      [100, 0],
+      [100, 30],
+      [50, 30],
+      [50, 60],
+      [0, 60],
+    ],
+  ];
   const r = voronoiBuild(m, {
     ...params,
     ...lobbyZone(concave, 10),
@@ -82,9 +104,40 @@ test("lobby respects concave zone edges even with full balloons enabled", () => 
     domain: { loops: concave, elevation: 0 },
   });
   for (let i = 0; i < r.raw.positions.length; i += 3)
-    assert.ok(!(r.raw.positions[i] > 50.0001 && r.raw.positions[i + 1] > 30.0001), "no geometry spills into the adjoining zone");
+    assert.ok(
+      !(r.raw.positions[i] > 50.0001 && r.raw.positions[i + 1] > 30.0001),
+      "no geometry spills into the adjoining zone",
+    );
   assert.equal(r.quality.boundaryEdges, 0);
   assert.equal(r.spheres[0].analyticSurface, false);
+});
+
+test("layout height grows beyond bay radius, respects next floor, and retains individual scaling", () => {
+  for (const spatialType of ["studio", "lobby"]) {
+    const cfg = spatialType === "lobby" ? lobbyZone(loops, 12) : config;
+    const p = {
+      ...params,
+      ...cfg,
+      spatialType,
+      studioHeight: 12,
+      directCells: true,
+    };
+    const low = voronoiBuild(m, p);
+    const high = voronoiBuild(m, { ...p, studioHeight: 24 });
+    const capped = voronoiBuild(m, { ...p, studioHeight: 40 });
+    const peak = (r) =>
+      Math.max(...r.spheres.map((s) => s.radius * s.axisScale[2]));
+    assert.ok(Math.abs(peak(low) - 12) < 1e-8);
+    assert.ok(Math.abs(peak(high) - 24) < 1e-8);
+    assert.ok(Math.abs(peak(capped) - 25) < 1e-8);
+    const scaled = voronoiBuild(m, {
+      ...p,
+      studioHeight: 40,
+      edits: { 0: [0, 0, 0, 1, 1, 1, 1.2] },
+    });
+    assert.ok(peak(scaled) > 25);
+    assert.equal(high.quality.boundaryEdges, 0);
+  }
 });
 
 test("collaboration opt-in leaves custom geometry exactly unchanged", () => {

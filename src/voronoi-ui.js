@@ -136,6 +136,8 @@ export function initVoronoi(
       loops: boundary?.zones[activeZone]?.loops,
       config: zoneConfigs[activeZone],
       busy: pending || backgroundTasks > 0,
+      ceilingZ: floorHeightLimit(activeFloor, boundary).ceilingZ,
+      elevation: boundary?.elevation ?? 0,
     }),
     apply: (settings) => {
       if (!boundary) throw Error("IMPORT A ZONED FLOOR FIRST.");

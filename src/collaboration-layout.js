@@ -32,11 +32,11 @@ export function mountCollaborationLayout({ anchor, getState, apply }) {
   const root = document.createElement("details");
   root.className = "collaboration-layout";
   root.open = true;
-  root.innerHTML = `<summary>ZONE LAYOUT</summary><label>LAYOUT<select data-layout><option value="custom">EXISTING / CUSTOM</option><option value="studio">COLLABORATION OFFICE</option><option value="lobby">LOBBY</option></select></label><div data-fields><label>MAIN DIRECTION (DEGREES)<input data-field="studioAngle" type="number" value="0"></label><label>BAY SPACING (FT)<input data-field="studioBay" type="number" min="2" value="20"></label><label>VAULT ELONGATION<input data-field="studioElongation" type="number" min="1" max="4" step=".1" value="2"></label><label>GENERATED HEIGHT LIMIT (FT)<input data-field="studioHeight" type="number" min="1" value="12"></label></div><button type="button" data-preview>PREVIEW LAYOUT</button><button type="button" data-apply>APPLY ZONE LAYOUT</button><svg viewBox="0 0 240 240" aria-label="COLLABORATION LAYOUT PREVIEW" hidden></svg><output role="status"></output>`;
+  root.innerHTML = `<summary>ZONE LAYOUT</summary><label>LAYOUT<select data-layout><option value="custom">EXISTING / CUSTOM</option><option value="studio">OFFICE</option><option value="lobby">PUBLIC</option></select></label><div data-fields><label>MAIN DIRECTION (DEGREES)<input data-field="studioAngle" type="number" value="0"></label><label>BAY SPACING (FT)<input data-field="studioBay" type="number" min="2" value="20"></label><label>VAULT ELONGATION<input data-field="studioElongation" type="number" min="1" max="4" step=".1" value="2"></label><label>GENERATED HEIGHT LIMIT (FT)<input data-field="studioHeight" type="number" min="1" value="12"></label></div><output data-height-note></output><button type="button" data-preview>PREVIEW LAYOUT</button><button type="button" data-apply>APPLY ZONE LAYOUT</button><svg viewBox="0 0 240 240" aria-label="ZONE LAYOUT PREVIEW" hidden></svg><output role="status"></output>`;
   anchor.after(root);
   const q = (selector) => root.querySelector(selector),
     type = q("[data-layout]"),
-    output = q("output"),
+    output = q('output[role="status"]'),
     svg = q("svg");
   const defaults = {
     studioAngle: 0,
@@ -51,7 +51,22 @@ export function mountCollaborationLayout({ anchor, getState, apply }) {
         Number(q(`[data-field="${k}"]`).value),
       ]),
     );
+  function heightNote() {
+    const state = getState();
+    const clearance = state.ceilingZ - (state.elevation ?? 0);
+    const requested = Number(q('[data-field="studioHeight"]').value);
+    q("[data-height-note]").textContent =
+      ["studio", "lobby"].includes(type.value) &&
+      clearance > 0 &&
+      requested > clearance
+        ? "LIMITED TO " +
+          Number(clearance.toFixed(2)) +
+          " FT BY THE NEXT FLOOR. INDIVIDUAL BALLOONS CAN BE SCALED HIGHER."
+        : "";
+  }
+  q('[data-field="studioHeight"]').addEventListener("input", heightNote);
   function visibility() {
+    heightNote();
     q("[data-fields]").hidden = !["studio", "lobby"].includes(type.value);
     q("[data-preview]").disabled = !["studio", "lobby"].includes(type.value);
     for (const key of ["studioAngle", "studioBay", "studioElongation"])
