@@ -15,6 +15,7 @@ import {
 import { meshQuality } from "./mesh-quality.js";
 import { isUndoShortcut } from "./history.js";
 import { queueAutosave } from "./autosave.js";
+import { columnGridSites, gridBounds } from "./column-grid.js";
 import { inLoops } from "./zones.js";
 
 function zoneNameMesh(zone, elevation, active) {
@@ -79,7 +80,16 @@ export function initColumns(
   getFloors,
   { walls = false, getReferenceColumns = () => [] } = {},
 ) {
-  const findSites = (source) => findSupportSites(source, walls);
+  let gridSettings = {
+    mode: "collision",
+    spacing: 30,
+    distance: 5,
+    visible: true,
+  };
+  const findSites = (source) =>
+    !walls && gridSettings.mode === "grid"
+      ? columnGridSites(source, gridSettings.spacing, gridSettings.distance)
+      : findSupportSites(source, walls);
   const buildSupport = (source, site, settings) =>
     checkSupport(
       (walls ? wallMesh : columnMesh)(source, site, settings),
@@ -169,6 +179,89 @@ export function initColumns(
     buildingFloors = [];
   const floorVisibility = new Map();
   let showReferenceColumns = false;
+  let gridPanel;
+  function syncGridControls() {
+    if (!gridPanel) return;
+    gridPanel.querySelector("select").value = gridSettings.mode;
+    gridPanel.querySelector("[data-distance]").value = gridSettings.distance;
+    for (const input of gridPanel.querySelectorAll("[data-spacing]"))
+      input.value = gridSettings.spacing;
+    gridPanel.querySelector('input[type="checkbox"]').checked =
+      gridSettings.visible;
+  }
+  function loadGrid(value) {
+    gridSettings = {
+      mode: value?.mode === "grid" ? "grid" : "collision",
+      spacing:
+        Number.isFinite(value?.spacing) &&
+        value.spacing >= 10 &&
+        value.spacing <= 50
+          ? value.spacing
+          : 30,
+      distance:
+        Number.isFinite(value?.distance) &&
+        value.distance >= 1 &&
+        value.distance <= 25
+          ? value.distance
+          : 5,
+      visible: value?.visible !== false,
+    };
+    syncGridControls();
+  }
+  if (!walls) {
+    gridPanel = document.createElement("section");
+    gridPanel.className = "collaboration-layout";
+    gridPanel.innerHTML =
+      '<strong>COLUMN GRID</strong><label>PLACEMENT<select><option value="collision">BALLOON COLLISIONS</option><option value="grid">COLLISIONS NEAR GRID</option></select></label><label>GRID SPACING X / Y (FT)<input aria-label="GRID SPACING (FT)" data-spacing type="number" min="10" max="50" step="1" value="30"><input aria-label="GRID SPACING SLIDER" data-spacing type="range" min="10" max="50" step="1" value="30"></label><label>COLLISION SEARCH DISTANCE (FT)<input data-distance type="number" min="1" max="25" step="1" value="5"></label><label class="check"><input type="checkbox" checked> SHOW GRID</label>';
+    pane.querySelector(".voro-controls").prepend(gridPanel);
+    gridPanel.onchange = guarded(() => {
+      const spacing = Number(
+        gridPanel.querySelector('input[type="number"]').value,
+      );
+      if (!Number.isFinite(spacing) || spacing < 10 || spacing > 50)
+        throw Error("USE GRID SPACING FROM 10 TO 50 FT.");
+      const distance = Number(gridPanel.querySelector("[data-distance]").value);
+      if (!Number.isFinite(distance) || distance < 1 || distance > 25)
+        throw Error("USE COLLISION SEARCH DISTANCE FROM 1 TO 25 FT.");
+      const next = {
+        distance,
+        mode: gridPanel.querySelector("select").value,
+        spacing,
+        visible: gridPanel.querySelector('input[type="checkbox"]').checked,
+      };
+      const prior = gridSettings;
+      gridSettings = next;
+      try {
+        if (source) sites = findSites(source);
+      } catch (e) {
+        gridSettings = prior;
+        syncGridControls();
+        throw e;
+      }
+      $("cSites").replaceChildren(
+        ...sites.map(
+          (s) =>
+            new Option(
+              `${s.id + 1}. ${s.kind} · X ${s.x.toFixed(2)}, Y ${s.y.toFixed(2)}`,
+              s.id,
+            ),
+        ),
+      );
+      display();
+      status(
+        gridSettings.mode === "grid"
+          ? sites.length +
+              " COLLISIONS SUGGESTED NEAR GRID · CLICK TO PLACE · EXISTING COLUMNS KEPT."
+          : "COLLISION PLACEMENT · EXISTING COLUMNS KEPT.",
+      );
+      queueAutosave();
+    });
+    for (const input of gridPanel.querySelectorAll("[data-spacing]"))
+      input.oninput = () => {
+        for (const other of gridPanel.querySelectorAll("[data-spacing]"))
+          if (other !== input) other.value = input.value;
+      };
+  }
   let referenceToggle;
   if (walls) {
     const label = document.createElement("label");
@@ -274,6 +367,7 @@ export function initColumns(
       columns: structuredClone(columns),
       selected,
       settings: settings(),
+      gridSettings: { ...gridSettings },
       ghost,
       wire,
     };
@@ -413,6 +507,33 @@ export function initColumns(
     edges.visible = wire;
     roof.add(edges);
     root.add(roof);
+    if (!walls && gridSettings.mode === "grid" && gridSettings.visible) {
+      const { min, max } = gridBounds(source.raw),
+        points = [],
+        spacing = gridSettings.spacing;
+      for (let axis = 0; axis < 2; axis++)
+        for (
+          let n = Math.ceil(min[axis] / spacing);
+          n <= Math.floor(max[axis] / spacing) && points.length < 4000;
+          n++
+        ) {
+          const a = [min[0], min[1], source.params.floor + 0.03],
+            b = [max[0], max[1], source.params.floor + 0.03];
+          a[axis] = b[axis] = n * spacing;
+          points.push(new T.Vector3(...a), new T.Vector3(...b));
+        }
+      root.add(
+        new T.LineSegments(
+          new T.BufferGeometry().setFromPoints(points),
+          new T.LineBasicMaterial({
+            color: 0x80dce7,
+            transparent: true,
+            opacity: 0.3,
+            depthWrite: false,
+          }),
+        ),
+      );
+    }
     columns.forEach((c, i) => {
       const mesh = new T.Mesh(
         geometry(c.raw),
@@ -428,7 +549,11 @@ export function initColumns(
     });
     if (pick)
       for (const site of sites) {
-        const used = columns.some((c) => c.site.id === site.id);
+        const used = columns.some((c) =>
+          walls
+            ? c.site.id === site.id
+            : Math.hypot(c.site.x - site.x, c.site.y - site.y) < 0.0001,
+        );
         if (walls) {
           const ridge = new T.Line(
             new T.BufferGeometry().setFromPoints(
@@ -514,7 +639,9 @@ export function initColumns(
     if (!source) throw Error("Copy a Voronoi enclosure first.");
     const found = columns.findIndex(
       (c) =>
-        c.site.id === site.id &&
+        (walls
+          ? c.site.id === site.id
+          : Math.hypot(c.site.x - site.x, c.site.y - site.y) < 0.0001) &&
         (!walls ||
           (c.site.pair === site.pair &&
             c.site.x === site.x &&
@@ -593,7 +720,7 @@ export function initColumns(
     workingFloor = index;
     const saved = floorWork.get(index);
     source = saved?.source;
-    sites = saved?.sites ?? [];
+    sites = source && !walls ? findSites(source) : (saved?.sites ?? []);
     columns = saved?.columns ?? [];
     selected = saved?.selected ?? -1;
     copiedEnclosure = saved?.copiedEnclosure;
@@ -861,6 +988,7 @@ export function initColumns(
     next.raw = rawCopy(next.raw);
     if (!Number.isFinite(next.params?.width) || !next.spheres?.length)
       throw Error("Invalid enclosure.");
+    loadGrid(data.gridSettings);
     const found = findSites(next),
       rebuilt = data.columns.map((c) => {
         if (!c.site || ![c.site.x, c.site.y].every(Number.isFinite))
@@ -1171,6 +1299,7 @@ export function initColumns(
         isolateEditingFloor,
         showZones,
         showReferenceColumns,
+        gridSettings: { ...gridSettings },
         ghost,
         wire,
         settings: settings(),
@@ -1179,6 +1308,7 @@ export function initColumns(
     },
     loadSession(data) {
       if (!data) return;
+      loadGrid(data.gridSettings);
       source = undefined;
       workingFloor = undefined;
       columns = [];
